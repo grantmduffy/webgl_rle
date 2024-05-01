@@ -45,10 +45,19 @@ uniform int i;
 
 void main(){
     ivec2 ij = ivec2(gl_FragCoord.xy);
-    if (i == 0){
-        frag_color = int(texelFetch(value_tex, ij, 0).x);
+    uint this_value = texelFetch(value_tex, ij, 0).x;
+    int this_len = texelFetch(rle_tex, ij, 0).x;
+    uint right_value = texelFetch(value_tex, ij + ivec2(1 << i, 0), 0).x;
+    int right_len = texelFetch(rle_tex, ij + ivec2(1 << i, 0), 0).x;
+    int out_len = this_len + right_len;
+    if (
+            1 << i < res                    // in bounds
+            && this_len == 1 << (i - 1)     // current value isn't limitted
+            && this_value == right_value    // values are in the same block
+        ){
+        frag_color = this_len + right_len;  // count
     } else {
-        frag_color = texelFetch(rle_tex, ij, 0).x + texelFetch(rle_tex, ij + ivec2(1 << i, 0), 0).x;
+        frag_color = this_len;              // stop counting
     }
 }
 
@@ -159,13 +168,13 @@ function main(){
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16I, res, res, 0, gl.RED_INTEGER, gl.SHORT, 
-        new Int16Array(Array(res * res).fill(0).flat()));
+        new Int16Array(Array(res * res).fill(1).flat()));
     out_texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, out_texture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16I, res, res, 0, gl.RED_INTEGER, gl.SHORT, 
-        new Int16Array(Array(res * res).fill(0).flat()));
+        new Int16Array(Array(res * res).fill(1).flat()));
     
     // setup value_fbo
     value_fbo = gl.createFramebuffer();
@@ -193,7 +202,7 @@ function main(){
     gl.vertexAttribPointer(vert_attr, 2, gl.FLOAT, gl.FALSE, 2 * 4, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-    for (i = 0; i < 9; i++){
+    for (i = 1; i <= 9; i++){
 
         // render to run_length_fbo
         gl.useProgram(buffer_program);
