@@ -39,25 +39,24 @@ buffer_src = `#version 300 es
 precision highp float;
 precision highp int;
 precision highp usampler2D;
-precision highp isampler2D;
 
 in vec2 xy;
-out int frag_color;
+out uint frag_color;
 uniform usampler2D value_tex;
-uniform isampler2D rle_tex;
+uniform usampler2D rle_tex;
 uniform int res;
 uniform int i;
 
 void main(){
     ivec2 ij = ivec2(gl_FragCoord.xy);
     uint this_value = texelFetch(value_tex, ij, 0).x;
-    int this_len = texelFetch(rle_tex, ij, 0).x;
+    uint this_len = texelFetch(rle_tex, ij, 0).x;
     uint right_value = texelFetch(value_tex, ij + ivec2(1 << i, 0), 0).x;
-    int right_len = texelFetch(rle_tex, ij + ivec2(1 << i, 0), 0).x;
-    int out_len = this_len + right_len;
+    uint right_len = texelFetch(rle_tex, ij + ivec2(1 << i, 0), 0).x;
+    uint out_len = this_len + right_len;
     if (
             1 << i < res                    // in bounds
-            && this_len == 1 << i           // current value isn't limitted
+            && this_len == uint(1 << i)     // current value isn't limitted
             && this_value == right_value    // values are in the same block
         ){
         frag_color = this_len + right_len;  // count
@@ -74,12 +73,11 @@ precision highp float;
 precision highp int;
 precision highp sampler2D;
 precision highp usampler2D;
-precision highp isampler2D;
 
 in vec2 xy;
 out vec4 frag_color;
 uniform usampler2D value_tex;
-uniform isampler2D rle_tex;
+uniform usampler2D rle_tex;
 uniform int res;
 
 void main(){
@@ -175,14 +173,14 @@ function main(){
     gl.bindTexture(gl.TEXTURE_2D, in_texture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16I, res, res, 0, gl.RED_INTEGER, gl.SHORT, 
-        new Int16Array(Array(res * res).fill(1).flat()));
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16UI, res, res, 0, gl.RED_INTEGER, gl.UNSIGNED_SHORT, 
+        new Uint16Array(Array(res * res).fill(1).flat()));
     out_texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, out_texture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16I, res, res, 0, gl.RED_INTEGER, gl.SHORT, 
-        new Int16Array(Array(res * res).fill(1).flat()));
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16UI, res, res, 0, gl.RED_INTEGER, gl.UNSIGNED_SHORT, 
+        new Uint16Array(Array(res * res).fill(1).flat()));
     
     // setup value_fbo
     value_fbo = gl.createFramebuffer();
