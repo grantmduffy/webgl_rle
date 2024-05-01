@@ -41,12 +41,15 @@ out int frag_color;
 uniform usampler2D value_tex;
 uniform isampler2D rle_tex;
 uniform int res;
+uniform int i;
 
 void main(){
     ivec2 ij = ivec2(gl_FragCoord.xy);
-    uint val = texelFetch(value_tex, ij, 0).x;
-    uint val_e = texelFetch(value_tex, ij + ivec2(1, 0), 0).x;
-    frag_color = ij.x + 1 >= res ? 1 : int(val != val_e);
+    if (i == 0){
+        frag_color = int(texelFetch(value_tex, ij, 0).x);
+    } else {
+        frag_color = texelFetch(rle_tex, ij, 0).x + texelFetch(rle_tex, ij + ivec2(1 << i, 0), 0).x;
+    }
 }
 
 `;
@@ -66,7 +69,7 @@ uniform isampler2D rle_tex;
 
 void main(){
     ivec2 ij = ivec2(gl_FragCoord.xy);
-    int val = texelFetch(rle_tex, ij, 0).x;
+    float val = float(texelFetch(rle_tex, ij, 0).x) / 255.;
     frag_color = vec4(vec3(val), 1.);
 }
 
@@ -156,13 +159,13 @@ function main(){
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16I, res, res, 0, gl.RED_INTEGER, gl.SHORT, 
-        new Int16Array(Array(res * res).fill(1).flat()));
+        new Int16Array(Array(res * res).fill(0).flat()));
     out_texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, out_texture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16I, res, res, 0, gl.RED_INTEGER, gl.SHORT, 
-        new Int16Array(Array(res * res).fill(1).flat()));
+        new Int16Array(Array(res * res).fill(0).flat()));
     
     // setup value_fbo
     value_fbo = gl.createFramebuffer();
@@ -190,22 +193,31 @@ function main(){
     gl.vertexAttribPointer(vert_attr, 2, gl.FLOAT, gl.FALSE, 2 * 4, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-    // render to run_length_fbo
-    gl.useProgram(buffer_program);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, run_length_fbo);
-    gl.uniform1i(gl.getUniformLocation(buffer_program, 'value_tex'), 0);
-    gl.uniform1i(gl.getUniformLocation(buffer_program, 'rle_tex'), 1);
-    gl.uniform1i(gl.getUniformLocation(buffer_program, 'res'), res);
-    gl.bindTexture(gl.TEXTURE_2D, in_texture);
-    vert_attr = gl.getAttribLocation(buffer_program, 'vert_pos');
-    gl.enableVertexAttribArray(vert_attr);
-    gl.vertexAttribPointer(vert_attr, 2, gl.FLOAT, gl.FALSE, 2 * 4, 0);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    for (i = 0; i < 9; i++){
+
+        // render to run_length_fbo
+        gl.useProgram(buffer_program);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, run_length_fbo);
+        gl.uniform1i(gl.getUniformLocation(buffer_program, 'value_tex'), 0);
+        gl.uniform1i(gl.getUniformLocation(buffer_program, 'rle_tex'), 1);
+        gl.uniform1i(gl.getUniformLocation(buffer_program, 'res'), res);
+        gl.uniform1i(gl.getUniformLocation(buffer_program, 'i'), i);
+        gl.bindTexture(gl.TEXTURE_2D, in_texture);
+        vert_attr = gl.getAttribLocation(buffer_program, 'vert_pos');
+        gl.enableVertexAttribArray(vert_attr);
+        gl.vertexAttribPointer(vert_attr, 2, gl.FLOAT, gl.FALSE, 2 * 4, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        // swap textures
+        [in_texture, out_texture] = [out_texture, in_texture];
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, out_texture, 0);
+        gl.bindTexture(gl.TEXTURE_2D, in_texture);
+    }
 
     // render to canvas
     gl.useProgram(canvas_program);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.bindTexture(gl.TEXTURE_2D, out_texture);
+    gl.bindTexture(gl.TEXTURE_2D, in_texture);
     gl.uniform1i(gl.getUniformLocation(canvas_program, 'value_tex'), 0);
     gl.uniform1i(gl.getUniformLocation(canvas_program, 'rle_tex'), 1);
     vert_attr = gl.getAttribLocation(canvas_program, 'vert_pos');
