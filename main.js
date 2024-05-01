@@ -34,18 +34,19 @@ buffer_src = `#version 300 es
 precision highp float;
 precision highp int;
 precision highp usampler2D;
+precision highp isampler2D;
 
 in vec2 xy;
-out uint frag_color;
+out int frag_color;
 uniform usampler2D value_tex;
-uniform usampler2D rle_tex;
+uniform isampler2D rle_tex;
 uniform int res;
 
 void main(){
     ivec2 ij = ivec2(gl_FragCoord.xy);
     uint val = texelFetch(value_tex, ij, 0).x;
     uint val_e = texelFetch(value_tex, ij + ivec2(1, 0), 0).x;
-    frag_color = ij.x + 1 >= res ? uint(1) : uint(val != val_e);
+    frag_color = ij.x + 1 >= res ? 1 : int(val != val_e);
 }
 
 `;
@@ -56,15 +57,16 @@ precision highp float;
 precision highp int;
 precision highp sampler2D;
 precision highp usampler2D;
+precision highp isampler2D;
 
 in vec2 xy;
 out vec4 frag_color;
 uniform usampler2D value_tex;
-uniform usampler2D rle_tex;
+uniform isampler2D rle_tex;
 
 void main(){
     ivec2 ij = ivec2(gl_FragCoord.xy);
-    uint val = texelFetch(rle_tex, ij, 0).x;
+    int val = texelFetch(rle_tex, ij, 0).x;
     frag_color = vec4(vec3(val), 1.);
 }
 
@@ -153,14 +155,14 @@ function main(){
     gl.bindTexture(gl.TEXTURE_2D, in_texture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16UI, res, res, 0, gl.RED_INTEGER, gl.UNSIGNED_SHORT, 
-        new Uint16Array(Array(res * res).fill(1).flat()));
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16I, res, res, 0, gl.RED_INTEGER, gl.SHORT, 
+        new Int16Array(Array(res * res).fill(1).flat()));
     out_texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, out_texture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16UI, res, res, 0, gl.RED_INTEGER, gl.UNSIGNED_SHORT, 
-        new Uint16Array(Array(res * res).fill(1).flat()));
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16I, res, res, 0, gl.RED_INTEGER, gl.SHORT, 
+        new Int16Array(Array(res * res).fill(1).flat()));
     
     // setup value_fbo
     value_fbo = gl.createFramebuffer();
