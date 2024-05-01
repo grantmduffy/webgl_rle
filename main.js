@@ -25,7 +25,11 @@ out vec4 frag_color;
 uniform sampler2D in_tex;
 
 void main(){
-    frag_color = vec4(1., 0., 0., 1.);
+    if (length(xy - vec2(0.5, 0.5)) < 0.2){
+        frag_color = vec4(0., 1., 1., 1.);
+    } else {
+        frag_color = vec4(1., 0., 1., 1.);
+    }
 }
 
 `;
@@ -41,8 +45,7 @@ out vec4 frag_color;
 uniform sampler2D in_tex;
 
 void main(){
-    vec4 tex_color = texture(in_tex, xy);
-    frag_color = tex_color;
+    frag_color = texture(in_tex, xy);
 }
 
 `;
