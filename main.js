@@ -21,15 +21,11 @@ precision highp int;
 precision highp sampler2D;
 
 in vec2 xy;
-out vec4 frag_color;
+out uint frag_color;
 uniform sampler2D in_tex;
 
 void main(){
-    if (length(xy - vec2(0.5, 0.5)) < 0.2){
-        frag_color = vec4(0., 1., 1., 1.);
-    } else {
-        frag_color = vec4(1., 0., 1., 1.);
-    }
+    frag_color = uint(length(xy - vec2(0.5, 0.5)) < 0.2);
 }
 
 `;
@@ -39,13 +35,16 @@ canvas_src = `#version 300 es
 precision highp float;
 precision highp int;
 precision highp sampler2D;
+precision highp usampler2D;
 
 in vec2 xy;
 out vec4 frag_color;
-uniform sampler2D in_tex;
+uniform usampler2D in_tex;
 
 void main(){
-    frag_color = texture(in_tex, xy);
+    ivec2 ij = ivec2(gl_FragCoord.xy);
+    uint val = texelFetch(in_tex, ij, 0).x;
+    frag_color = vec4(0., 1., float(val), 1.);
 }
 
 `;
@@ -124,14 +123,14 @@ function main(){
     gl.bindTexture(gl.TEXTURE_2D, in_texture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, res, res, 0, gl.RGBA, gl.FLOAT, 
-        new Float32Array(Array(res * res).fill([0, 1, 1, 1]).flat()));
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16UI, res, res, 0, gl.RED_INTEGER, gl.UNSIGNED_SHORT, 
+        new Uint16Array(Array(res * res).fill(1).flat()));
     out_texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, out_texture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, res, res, 0, gl.RGBA, gl.FLOAT, 
-        new Float32Array(Array(res * res).fill([1, 0, 1, 1]).flat()));
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16UI, res, res, 0, gl.RED_INTEGER, gl.UNSIGNED_SHORT, 
+        new Uint16Array(Array(res * res).fill(1).flat()));
     
     // setup fbo
     fbo = gl.createFramebuffer();
@@ -149,8 +148,8 @@ function main(){
     vert_attr = gl.getAttribLocation(buffer_program, 'vert_pos');
     gl.enableVertexAttribArray(vert_attr);
     gl.vertexAttribPointer(vert_attr, 2, gl.FLOAT, gl.FALSE, 2 * 4, 0);
-    gl.clearColor(0, 0, 0, 1);
-    gl.clear(gl.DEPTH_BUFFER_BIT | gl.COLOR_BUFFER_BIT);
+    // gl.clearColor(0, 0, 0, 0);
+    // gl.clear(gl.DEPTH_BUFFER_BIT | gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
     // render to canvas
