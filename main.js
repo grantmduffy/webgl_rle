@@ -24,7 +24,12 @@ in vec2 xy;
 out uint frag_color;
 
 void main(){
-    frag_color = uint(length(xy - vec2(0.5, 0.5)) < 0.2);
+    frag_color = max(
+        uint(255) * uint(
+            abs(length(xy - vec2(0.5, 0.5)) - 0.2) < 0.05
+            || length(xy - vec2(0.1, 0.9)) < 0.05
+        ), uint(255. * float(xy.x > 0.9 && xy.y > 0.9) * (xy.x - 0.9))
+    );
 }
 
 `;
@@ -52,7 +57,7 @@ void main(){
     int out_len = this_len + right_len;
     if (
             1 << i < res                    // in bounds
-            && this_len == 1 << (i - 1)     // current value isn't limitted
+            && this_len == 1 << i           // current value isn't limitted
             && this_value == right_value    // values are in the same block
         ){
         frag_color = this_len + right_len;  // count
@@ -75,11 +80,14 @@ in vec2 xy;
 out vec4 frag_color;
 uniform usampler2D value_tex;
 uniform isampler2D rle_tex;
+uniform int res;
 
 void main(){
     ivec2 ij = ivec2(gl_FragCoord.xy);
-    float val = float(texelFetch(rle_tex, ij, 0).x) / 255.;
-    frag_color = vec4(vec3(val), 1.);
+    float val = float(texelFetch(value_tex, ij, 0).x) / 255.;
+    float len = float(texelFetch(rle_tex, ij, 0).x) / float(res - 1);
+    frag_color = vec4(0., val, len, 1.);
+    // frag_color = vec4(vec3(len), 1.);
 }
 
 `;
@@ -202,7 +210,7 @@ function main(){
     gl.vertexAttribPointer(vert_attr, 2, gl.FLOAT, gl.FALSE, 2 * 4, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-    for (i = 1; i <= 9; i++){
+    for (i = 0; i <= 9; i++){
 
         // render to run_length_fbo
         gl.useProgram(buffer_program);
@@ -229,6 +237,7 @@ function main(){
     gl.bindTexture(gl.TEXTURE_2D, in_texture);
     gl.uniform1i(gl.getUniformLocation(canvas_program, 'value_tex'), 0);
     gl.uniform1i(gl.getUniformLocation(canvas_program, 'rle_tex'), 1);
+    gl.uniform1i(gl.getUniformLocation(canvas_program, 'res'), res);
     vert_attr = gl.getAttribLocation(canvas_program, 'vert_pos');
     gl.enableVertexAttribArray(vert_attr);
     gl.vertexAttribPointer(vert_attr, 2, gl.FLOAT, gl.FALSE, 2 * 4, 0);
