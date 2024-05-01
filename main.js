@@ -133,7 +133,7 @@ function print_error(source, err){
 }
 
 
-res = 512
+res = 256
 
 
 function main(){
@@ -228,6 +228,31 @@ function main(){
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, out_texture, 0);
         gl.bindTexture(gl.TEXTURE_2D, in_texture);
     }
+    
+    // decode rle TODO: speed up, this takes majority of time
+    console.log('decoding...');
+    lens = [];
+    run_lens = [];
+    pixel_buffer = new Uint16Array(1);
+    output_el = document.getElementById('output');
+    for (j = res - 1; j >= 0; j--){
+        i = 0;
+        while (i < res){
+            gl.readPixels(i, j, 1, 1, gl.RED_INTEGER, gl.UNSIGNED_SHORT, pixel_buffer);
+            lens.push([i, j, pixel_buffer[0]]);
+            i += pixel_buffer[0];
+        }
+    }
+    pixel_buffer = new Uint8Array(1);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, value_fbo);
+    for (idx = 0; idx < lens.length; idx++){
+        [i, j, len] = lens[idx];
+        gl.readPixels(i, j, 1, 1, gl.RED_INTEGER, gl.UNSIGNED_BYTE, pixel_buffer);
+        val = pixel_buffer[0];
+        run_lens.push([val, len]);
+        output_el.innerHTML += `${val}x${len}\n`;
+    }
+    console.log('done');
 
     // render to canvas
     gl.useProgram(canvas_program);
@@ -244,5 +269,4 @@ function main(){
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
 
-    console.log('done');
 }
