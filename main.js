@@ -33,14 +33,19 @@ buffer_src = `#version 300 es
 
 precision highp float;
 precision highp int;
-precision highp sampler2D;
+precision highp usampler2D;
 
 in vec2 xy;
 out uint frag_color;
-uniform sampler2D in_tex;
+uniform usampler2D value_tex;
+uniform usampler2D rle_tex;
+uniform int res;
 
 void main(){
-    frag_color = uint(length(xy - vec2(0.5, 0.5)) < 0.2);
+    ivec2 ij = ivec2(gl_FragCoord.xy);
+    uint val = texelFetch(value_tex, ij, 0).x;
+    uint val_e = texelFetch(value_tex, ij + ivec2(1, 0), 0).x;
+    frag_color = ij.x + 1 >= res ? uint(1) : uint(val != val_e);
 }
 
 `;
@@ -59,7 +64,7 @@ uniform usampler2D rle_tex;
 
 void main(){
     ivec2 ij = ivec2(gl_FragCoord.xy);
-    uint val = texelFetch(value_tex, ij, 0).x;
+    uint val = texelFetch(rle_tex, ij, 0).x;
     frag_color = vec4(vec3(val), 1.);
 }
 
@@ -183,23 +188,23 @@ function main(){
     gl.vertexAttribPointer(vert_attr, 2, gl.FLOAT, gl.FALSE, 2 * 4, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-    // // render to run_length_fbo
-    // gl.useProgram(buffer_program);
-    // gl.bindFramebuffer(gl.FRAMEBUFFER, run_length_fbo);
-    // gl.bindTexture(gl.TEXTURE_2D, in_texture);
-    // vert_attr = gl.getAttribLocation(buffer_program, 'vert_pos');
-    // gl.enableVertexAttribArray(vert_attr);
-    // gl.vertexAttribPointer(vert_attr, 2, gl.FLOAT, gl.FALSE, 2 * 4, 0);
-    // gl.drawArrays(gl.TRIANGLES, 0, 6);
+    // render to run_length_fbo
+    gl.useProgram(buffer_program);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, run_length_fbo);
+    gl.uniform1i(gl.getUniformLocation(buffer_program, 'value_tex'), 0);
+    gl.uniform1i(gl.getUniformLocation(buffer_program, 'rle_tex'), 1);
+    gl.uniform1i(gl.getUniformLocation(buffer_program, 'res'), res);
+    gl.bindTexture(gl.TEXTURE_2D, in_texture);
+    vert_attr = gl.getAttribLocation(buffer_program, 'vert_pos');
+    gl.enableVertexAttribArray(vert_attr);
+    gl.vertexAttribPointer(vert_attr, 2, gl.FLOAT, gl.FALSE, 2 * 4, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
 
     // render to canvas
     gl.useProgram(canvas_program);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, value_texture);
-    gl.uniform1i(gl.getUniformLocation(canvas_program, 'value_tex'), 0);
-    gl.activeTexture(gl.TEXTURE0 + 1);
     gl.bindTexture(gl.TEXTURE_2D, out_texture);
+    gl.uniform1i(gl.getUniformLocation(canvas_program, 'value_tex'), 0);
     gl.uniform1i(gl.getUniformLocation(canvas_program, 'rle_tex'), 1);
     vert_attr = gl.getAttribLocation(canvas_program, 'vert_pos');
     gl.enableVertexAttribArray(vert_attr);
