@@ -70,6 +70,45 @@ void main(){
 
 `;
 
+sum_prep_src = `#version 300 es
+
+#define max_count_large 255
+#define max_count_small 15
+#define max_value 15
+
+precision highp float;
+precision highp int;
+precision highp sampler2D;
+precision highp usampler2D;
+
+in vec2 xy;
+out uint frag_color;
+uniform usampler2D value_tex;
+uniform usampler2D rle_tex;
+uniform int res;
+
+void main(){
+    ivec2 ij = ivec2(gl_FragCoord.xy);
+    uint val = texelFetch(value_tex, ij, 0).x;
+    uint len = texelFetch(rle_tex, ij, 0).x;
+    if (val == uint(0) || val == uint(max_value)){
+        if ((len % uint(max_count_large)) == uint(0)){
+            frag_color = uint(2);
+        } else {
+            frag_color = uint(0);
+        }
+    } else {
+        if ((len % uint(max_count_small)) == uint(0)){
+            frag_color = uint(1);
+        } else {
+            frag_color = uint(0);
+        }
+    }
+}
+
+`
+
+
 canvas_src = `#version 300 es
 
 #define max_count_large 127
@@ -91,10 +130,22 @@ void main(){
     ivec2 ij = ivec2(gl_FragCoord.xy);
     uint val_uint = texelFetch(value_tex, ij, 0).x;
     uint len_uint = texelFetch(rle_tex, ij, 0).x;
-    len_uint = val_uint == uint(0x0000) || val_uint == uint(max_value) ? len_uint % uint(max_count_large) : len_uint % uint(max_count_small);
-    float val = float(val_uint) / float(max_value)  ;
-    float len = val_uint == uint(0x0000) || val_uint == uint(max_value) ? float(len_uint) / float(max_count_large) : float(len_uint) / float(max_count_small);
-    frag_color = vec4(0., val, len, 1.);
+
+    frag_color = vec4(0., 0., float(val_uint) / float(max_value), 1.);
+
+    switch (len_uint) {
+        case uint(1):
+            frag_color.r = 1.;
+            break;
+        case uint(2):
+            frag_color.g = 1.;
+            break;
+    }
+
+    // len_uint = val_uint == uint(0x0000) || val_uint == uint(max_value) ? len_uint % uint(max_count_large) : len_uint % uint(max_count_small);
+    // float val = float(val_uint) / float(max_value)  ;
+    // float len = val_uint == uint(0x0000) || val_uint == uint(max_value) ? float(len_uint) / float(max_count_large) : float(len_uint) / float(max_count_small);
+    // frag_color = vec4(0., val, len, 1.);
 }
 
 `;
@@ -160,6 +211,7 @@ function main(){
     vs = compile_shader(vs_src, gl.VERTEX_SHADER);
     image_program = link_program(vs, compile_shader(image_src, gl.FRAGMENT_SHADER));
     rle_program = link_program(vs, compile_shader(rle_src, gl.FRAGMENT_SHADER));
+    sum_prep_program = link_program(vs, compile_shader(sum_prep_src, gl.FRAGMENT_SHADER));
     canvas_program = link_program(vs, compile_shader(canvas_src, gl.FRAGMENT_SHADER));
 
     vert_buffer = gl.createBuffer();
@@ -237,31 +289,47 @@ function main(){
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, out_texture, 0);
         gl.bindTexture(gl.TEXTURE_2D, in_texture);
     }
+
+    // prepare for summation step
+    gl.useProgram(sum_prep_program);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, run_length_fbo);
+    gl.uniform1i(gl.getUniformLocation(sum_prep_program, 'value_tex'), 0);
+    gl.uniform1i(gl.getUniformLocation(sum_prep_program, 'rle_tex'), 1);
+    gl.uniform1i(gl.getUniformLocation(sum_prep_program, 'res'), res);
+    vert_attr = gl.getAttribLocation(sum_prep_program, 'vert_pos');
+    gl.enableVertexAttribArray(vert_attr);
+    gl.vertexAttribPointer(vert_attr, 2, gl.FLOAT, gl.FALSE, 2 * 4, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    // swap textures
+    [in_texture, out_texture] = [out_texture, in_texture];
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, out_texture, 0);
+    gl.bindTexture(gl.TEXTURE_2D, in_texture);
     
     // decode rle TODO: speed up, this takes majority of time
-    console.log('decoding...');
-    lens = [];
-    run_lens = [];
-    pixel_buffer = new Uint16Array(1);
-    output_el = document.getElementById('output');
-    for (j = res - 1; j >= 0; j--){
-        i = 0;
-        while (i < res){
-            gl.readPixels(i, j, 1, 1, gl.RED_INTEGER, gl.UNSIGNED_SHORT, pixel_buffer);
-            lens.push([i, j, pixel_buffer[0]]);
-            i += pixel_buffer[0];
-        }
-    }
-    pixel_buffer = new Uint8Array(1);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, value_fbo);
-    for (idx = 0; idx < lens.length; idx++){
-        [i, j, len] = lens[idx];
-        gl.readPixels(i, j, 1, 1, gl.RED_INTEGER, gl.UNSIGNED_BYTE, pixel_buffer);
-        val = pixel_buffer[0];
-        run_lens.push([val, len]);
-        output_el.innerHTML += `${val}x${len}\n`;
-    }
-    console.log('done');
+    // console.log('decoding...');
+    // lens = [];
+    // run_lens = [];
+    // pixel_buffer = new Uint16Array(1);
+    // output_el = document.getElementById('output');
+    // for (j = res - 1; j >= 0; j--){
+    //     i = 0;
+    //     while (i < res){
+    //         gl.readPixels(i, j, 1, 1, gl.RED_INTEGER, gl.UNSIGNED_SHORT, pixel_buffer);
+    //         lens.push([i, j, pixel_buffer[0]]);
+    //         i += pixel_buffer[0];
+    //     }
+    // }
+    // pixel_buffer = new Uint8Array(1);
+    // gl.bindFramebuffer(gl.FRAMEBUFFER, value_fbo);
+    // for (idx = 0; idx < lens.length; idx++){
+    //     [i, j, len] = lens[idx];
+    //     gl.readPixels(i, j, 1, 1, gl.RED_INTEGER, gl.UNSIGNED_BYTE, pixel_buffer);
+    //     val = pixel_buffer[0];
+    //     run_lens.push([val, len]);
+    //     output_el.innerHTML += `${val}x${len}\n`;
+    // }
+    // console.log('done');
 
     // render to canvas
     gl.useProgram(canvas_program);
