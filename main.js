@@ -24,17 +24,20 @@ in vec2 xy;
 out uint frag_color;
 
 void main(){
+    frag_color = uint(15) * uint(abs(length(xy - vec2(0.5, 0.5)) - 0.2) < 0.05);  // center ring
     frag_color = max(
-        uint(255) * uint(
-            abs(length(xy - vec2(0.5, 0.5)) - 0.2) < 0.05
-            || length(xy - vec2(0.1, 0.9)) < 0.05
-        ), uint(255. * float(xy.x > 0.9 && xy.y > 0.9) * (xy.x - 0.9))
-    );
+        uint(10) * uint(length(xy - vec2(0.1, 0.9)) < 0.05),
+        frag_color
+    );  // top left circle
+    frag_color = max(
+        uint(15. * float(xy.x > 0.9 && xy.y > 0.9) * (xy.x - 0.9) * 10.),
+        frag_color
+    );  // top right gradient
 }
 
 `;
 
-buffer_src = `#version 300 es
+rle_src = `#version 300 es
 
 precision highp float;
 precision highp int;
@@ -69,6 +72,10 @@ void main(){
 
 canvas_src = `#version 300 es
 
+#define max_count_large 127
+#define max_count_small 15
+#define max_value 15
+
 precision highp float;
 precision highp int;
 precision highp sampler2D;
@@ -82,10 +89,12 @@ uniform int res;
 
 void main(){
     ivec2 ij = ivec2(gl_FragCoord.xy);
-    float val = float(texelFetch(value_tex, ij, 0).x) / 255.;
-    float len = float(texelFetch(rle_tex, ij, 0).x) / float(res - 1);
+    uint val_uint = texelFetch(value_tex, ij, 0).x;
+    uint len_uint = texelFetch(rle_tex, ij, 0).x;
+    len_uint = val_uint == uint(0x0000) || val_uint == uint(max_value) ? len_uint % uint(max_count_large) : len_uint % uint(max_count_small);
+    float val = float(val_uint) / float(max_value)  ;
+    float len = val_uint == uint(0x0000) || val_uint == uint(max_value) ? float(len_uint) / float(max_count_large) : float(len_uint) / float(max_count_small);
     frag_color = vec4(0., val, len, 1.);
-    // frag_color = vec4(vec3(len), 1.);
 }
 
 `;
@@ -150,7 +159,7 @@ function main(){
 
     vs = compile_shader(vs_src, gl.VERTEX_SHADER);
     image_program = link_program(vs, compile_shader(image_src, gl.FRAGMENT_SHADER));
-    buffer_program = link_program(vs, compile_shader(buffer_src, gl.FRAGMENT_SHADER));
+    rle_program = link_program(vs, compile_shader(rle_src, gl.FRAGMENT_SHADER));
     canvas_program = link_program(vs, compile_shader(canvas_src, gl.FRAGMENT_SHADER));
 
     vert_buffer = gl.createBuffer();
@@ -203,7 +212,7 @@ function main(){
     // render to value fbo
     gl.useProgram(image_program);
     gl.bindFramebuffer(gl.FRAMEBUFFER, value_fbo);
-    vert_attr = gl.getAttribLocation(buffer_program, 'vert_pos');
+    vert_attr = gl.getAttribLocation(rle_program, 'vert_pos');
     gl.enableVertexAttribArray(vert_attr);
     gl.vertexAttribPointer(vert_attr, 2, gl.FLOAT, gl.FALSE, 2 * 4, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -211,14 +220,14 @@ function main(){
     for (i = 0; i <= 9; i++){
 
         // render to run_length_fbo
-        gl.useProgram(buffer_program);
+        gl.useProgram(rle_program);
         gl.bindFramebuffer(gl.FRAMEBUFFER, run_length_fbo);
-        gl.uniform1i(gl.getUniformLocation(buffer_program, 'value_tex'), 0);
-        gl.uniform1i(gl.getUniformLocation(buffer_program, 'rle_tex'), 1);
-        gl.uniform1i(gl.getUniformLocation(buffer_program, 'res'), res);
-        gl.uniform1i(gl.getUniformLocation(buffer_program, 'i'), i);
+        gl.uniform1i(gl.getUniformLocation(rle_program, 'value_tex'), 0);
+        gl.uniform1i(gl.getUniformLocation(rle_program, 'rle_tex'), 1);
+        gl.uniform1i(gl.getUniformLocation(rle_program, 'res'), res);
+        gl.uniform1i(gl.getUniformLocation(rle_program, 'i'), i);
         gl.bindTexture(gl.TEXTURE_2D, in_texture);
-        vert_attr = gl.getAttribLocation(buffer_program, 'vert_pos');
+        vert_attr = gl.getAttribLocation(rle_program, 'vert_pos');
         gl.enableVertexAttribArray(vert_attr);
         gl.vertexAttribPointer(vert_attr, 2, gl.FLOAT, gl.FALSE, 2 * 4, 0);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
