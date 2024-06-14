@@ -108,6 +108,38 @@ void main(){
 
 `
 
+cumsum_src = `#version 300 es
+
+precision highp float;
+precision highp int;
+precision highp usampler2D;
+
+in vec2 xy;
+out uint frag_color;
+uniform usampler2D value_tex;
+uniform usampler2D rle_tex;
+uniform int res;
+uniform int i;
+
+void main(){
+    ivec2 ij = ivec2(gl_FragCoord.xy);
+    uint this_value = texelFetch(value_tex, ij, 0).x;
+    uint this_len = texelFetch(rle_tex, ij, 0).x;
+    uint right_value = texelFetch(value_tex, ij + ivec2(1 << i, 0), 0).x;
+    uint right_len = texelFetch(rle_tex, ij + ivec2(1 << i, 0), 0).x;
+    uint out_len = this_len + right_len;
+    if (
+            1 << i < res                    // in bounds
+            && this_len == uint(1 << i)     // current value isn't limitted
+            && this_value == right_value    // values are in the same block
+        ){
+        frag_color = this_len + right_len;  // count
+    } else {
+        frag_color = this_len;              // stop counting
+    }
+}
+
+`;
 
 canvas_src = `#version 300 es
 
@@ -222,6 +254,8 @@ function main(){
     ]), gl.STATIC_DRAW);
 
     // setup textures
+
+    // TEXTURE 0: value texture, uint8
     gl.activeTexture(gl.TEXTURE0);
     value_texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, value_texture);
@@ -229,20 +263,46 @@ function main(){
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8UI, res, res, 0, gl.RED_INTEGER, gl.UNSIGNED_BYTE, 
         new Uint8Array(Array(res * res).fill(0).flat()));
+
+    // TEXTURE 1: reverse run length, uint16 (pair swapping)
     gl.activeTexture(gl.TEXTURE0 + 1);
-    in_texture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, in_texture);
+    rle_in_texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, rle_in_texture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16UI, res, res, 0, gl.RED_INTEGER, gl.UNSIGNED_SHORT, 
         new Uint16Array(Array(res * res).fill(1).flat()));
-    out_texture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, out_texture);
+    rle_out_texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, rle_out_texture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16UI, res, res, 0, gl.RED_INTEGER, gl.UNSIGNED_SHORT, 
         new Uint16Array(Array(res * res).fill(1).flat()));
     
+    // TEXTURE 2: cumsum/value texture, uint32 (4-bit value, 28 bit count) (pair swapping)
+    gl.activeTexture(gl.TEXTURE0 + 2);
+    cumsum_in_texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, cumsum_in_texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32UI, res, res, 0, gl.RED_INTEGER, gl.UNSIGNED_INT,
+        new Uint32Array(Array(res * res).fill(0).flat()));
+    cumsum_out_texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, cumsum_out_texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32UI, res, res, 0, gl.RED_INTEGER, gl.UNSIGNED_INT,
+        new Uint32Array(Array(res * res).fill(0).flat()));
+    
+    // TEXTURE 3: output texture, uint8 rle encoded stream
+    gl.activeTexture(gl.TEXTURE0 + 3);
+    out_texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, out_texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8UI, res, res, 0, gl.RED_INTEGER, gl.UNSIGNED_BYTE,
+        new Uint8Array(Array(res * res).fill(0).flat()));
+
     // setup value_fbo
     value_fbo = gl.createFramebuffer();
     depthbuffer = gl.createRenderbuffer();
@@ -254,12 +314,21 @@ function main(){
 
     // setup run_length_fbo
     run_length_fbo = gl.createFramebuffer();
-    depthbuffer = gl.createRenderbuffer();
-    gl.bindRenderbuffer(gl.RENDERBUFFER, depthbuffer);
-    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, res, res);
     gl.bindFramebuffer(gl.FRAMEBUFFER, run_length_fbo);
     gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depthbuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, out_texture, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_out_texture, 0);
+
+    // setup cumsum_fbo
+    cumsum_fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, value_fbo);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depthbuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, cumsum_fbo, 0);
+
+    // setup output_fbo
+    out_fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, out_fbo);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depthbuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, out_fbo, 0);
 
     // render to value fbo
     gl.useProgram(image_program);
@@ -268,7 +337,8 @@ function main(){
     gl.enableVertexAttribArray(vert_attr);
     gl.vertexAttribPointer(vert_attr, 2, gl.FLOAT, gl.FALSE, 2 * 4, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
-
+    
+    gl.activeTexture(gl.TEXTURE0 + 1);
     for (i = 0; i <= 9; i++){
 
         // render to run_length_fbo
@@ -278,16 +348,16 @@ function main(){
         gl.uniform1i(gl.getUniformLocation(rle_program, 'rle_tex'), 1);
         gl.uniform1i(gl.getUniformLocation(rle_program, 'res'), res);
         gl.uniform1i(gl.getUniformLocation(rle_program, 'i'), i);
-        gl.bindTexture(gl.TEXTURE_2D, in_texture);
+        gl.bindTexture(gl.TEXTURE_2D, rle_in_texture);
         vert_attr = gl.getAttribLocation(rle_program, 'vert_pos');
         gl.enableVertexAttribArray(vert_attr);
         gl.vertexAttribPointer(vert_attr, 2, gl.FLOAT, gl.FALSE, 2 * 4, 0);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
 
         // swap textures
-        [in_texture, out_texture] = [out_texture, in_texture];
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, out_texture, 0);
-        gl.bindTexture(gl.TEXTURE_2D, in_texture);
+        [rle_in_texture, rle_out_texture] = [rle_out_texture, rle_in_texture];
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_out_texture, 0);
+        gl.bindTexture(gl.TEXTURE_2D, rle_in_texture);
     }
 
     // prepare for summation step
@@ -302,39 +372,14 @@ function main(){
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
     // swap textures
-    [in_texture, out_texture] = [out_texture, in_texture];
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, out_texture, 0);
-    gl.bindTexture(gl.TEXTURE_2D, in_texture);
+    [rle_in_texture, rle_out_texture] = [rle_out_texture, rle_in_texture];
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_out_texture, 0);
+    gl.bindTexture(gl.TEXTURE_2D, rle_in_texture);
     
-    // decode rle TODO: speed up, this takes majority of time
-    // console.log('decoding...');
-    // lens = [];
-    // run_lens = [];
-    // pixel_buffer = new Uint16Array(1);
-    // output_el = document.getElementById('output');
-    // for (j = res - 1; j >= 0; j--){
-    //     i = 0;
-    //     while (i < res){
-    //         gl.readPixels(i, j, 1, 1, gl.RED_INTEGER, gl.UNSIGNED_SHORT, pixel_buffer);
-    //         lens.push([i, j, pixel_buffer[0]]);
-    //         i += pixel_buffer[0];
-    //     }
-    // }
-    // pixel_buffer = new Uint8Array(1);
-    // gl.bindFramebuffer(gl.FRAMEBUFFER, value_fbo);
-    // for (idx = 0; idx < lens.length; idx++){
-    //     [i, j, len] = lens[idx];
-    //     gl.readPixels(i, j, 1, 1, gl.RED_INTEGER, gl.UNSIGNED_BYTE, pixel_buffer);
-    //     val = pixel_buffer[0];
-    //     run_lens.push([val, len]);
-    //     output_el.innerHTML += `${val}x${len}\n`;
-    // }
-    // console.log('done');
-
     // render to canvas
     gl.useProgram(canvas_program);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.bindTexture(gl.TEXTURE_2D, in_texture);
+    gl.bindTexture(gl.TEXTURE_2D, rle_in_texture);
     gl.uniform1i(gl.getUniformLocation(canvas_program, 'value_tex'), 0);
     gl.uniform1i(gl.getUniformLocation(canvas_program, 'rle_tex'), 1);
     gl.uniform1i(gl.getUniformLocation(canvas_program, 'res'), res);
