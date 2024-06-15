@@ -92,18 +92,19 @@ void main(){
     uint val = texelFetch(value_tex, ij, 0).x;
     uint len = texelFetch(rle_tex, ij, 0).x;
     if (val == uint(0) || val == uint(max_value)){
-        if ((len % uint(max_count_large)) == uint(0)){
+        if (((len - uint(1)) % uint(max_count_large - 1)) == uint(0)){
             frag_color = uint(2);
         } else {
             frag_color = uint(0);
         }
     } else {
-        if ((len % uint(max_count_small)) == uint(0)){
+        if (((len - uint(1)) % uint(max_count_small - 1)) == uint(0)){
             frag_color = uint(1);
         } else {
             frag_color = uint(0);
         }
     }
+    frag_color |= val << 28;
 }
 
 `
@@ -156,16 +157,21 @@ in vec2 xy;
 out vec4 frag_color;
 uniform usampler2D value_tex;
 uniform usampler2D rle_tex;
+uniform usampler2D count_tex;
 uniform int res;
 
 void main(){
     ivec2 ij = ivec2(gl_FragCoord.xy);
     uint val_uint = texelFetch(value_tex, ij, 0).x;
     uint len_uint = texelFetch(rle_tex, ij, 0).x;
+    uint count_uint = texelFetch(count_tex, ij, 0).x;
 
-    frag_color = vec4(0., 0., float(val_uint) / float(max_value), 1.);
+    float val = float(count_uint >> 28) / float(max_value);
+    uint count = count_uint & uint(0x0fffffff);
 
-    switch (len_uint) {
+    frag_color = vec4(0., 0., val, 1.);
+
+    switch (count) {
         case uint(1):
             frag_color.r = 1.;
             break;
@@ -225,7 +231,7 @@ function print_error(source, err){
 }
 
 
-res = 256
+res = 512
 
 
 function main(){
@@ -320,15 +326,15 @@ function main(){
 
     // setup cumsum_fbo
     cumsum_fbo = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, value_fbo);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, cumsum_fbo);
     gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depthbuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, cumsum_fbo, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, cumsum_out_texture, 0);
 
     // setup output_fbo
     out_fbo = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, out_fbo);
     gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depthbuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, out_fbo, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, out_texture, 0);
 
     // render to value fbo
     gl.useProgram(image_program);
@@ -359,10 +365,10 @@ function main(){
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_out_texture, 0);
         gl.bindTexture(gl.TEXTURE_2D, rle_in_texture);
     }
-
+    // return;
     // prepare for summation step
     gl.useProgram(sum_prep_program);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, run_length_fbo);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, cumsum_fbo);
     gl.uniform1i(gl.getUniformLocation(sum_prep_program, 'value_tex'), 0);
     gl.uniform1i(gl.getUniformLocation(sum_prep_program, 'rle_tex'), 1);
     gl.uniform1i(gl.getUniformLocation(sum_prep_program, 'res'), res);
@@ -372,16 +378,17 @@ function main(){
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
     // swap textures
-    [rle_in_texture, rle_out_texture] = [rle_out_texture, rle_in_texture];
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_out_texture, 0);
-    gl.bindTexture(gl.TEXTURE_2D, rle_in_texture);
-    
+    // [rle_in_texture, rle_out_texture] = [rle_out_texture, rle_in_texture];
+    // gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_out_texture, 0);
+    // gl.bindTexture(gl.TEXTURE_2D, rle_in_texture);
+    // return;
     // render to canvas
     gl.useProgram(canvas_program);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.bindTexture(gl.TEXTURE_2D, rle_in_texture);
     gl.uniform1i(gl.getUniformLocation(canvas_program, 'value_tex'), 0);
     gl.uniform1i(gl.getUniformLocation(canvas_program, 'rle_tex'), 1);
+    gl.uniform1i(gl.getUniformLocation(canvas_program, 'count_tex'), 2);
     gl.uniform1i(gl.getUniformLocation(canvas_program, 'res'), res);
     vert_attr = gl.getAttribLocation(canvas_program, 'vert_pos');
     gl.enableVertexAttribArray(vert_attr);
