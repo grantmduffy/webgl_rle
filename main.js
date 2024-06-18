@@ -57,7 +57,6 @@ void main(){
     uint this_len = texelFetch(rle_tex, ij, 0).x;
     uint left_value = texelFetch(value_tex, ij_left, 0).x;
     uint left_len = texelFetch(rle_tex, ij_left, 0).x;
-    uint out_len = this_len + left_len;
     if (
             ij_left.x > 0                   // in bounds
             && this_len == uint(1 << i)     // current value isn't limitted
@@ -119,26 +118,23 @@ precision highp usampler2D;
 
 in vec2 xy;
 out uint frag_color;
-uniform usampler2D value_tex;
-uniform usampler2D rle_tex;
+uniform usampler2D cumsum_tex;
 uniform int res;
 uniform int i;
 
 void main(){
     ivec2 ij = ivec2(gl_FragCoord.xy);
-    uint this_value = texelFetch(value_tex, ij, 0).x;
-    uint this_len = texelFetch(rle_tex, ij, 0).x;
-    uint right_value = texelFetch(value_tex, ij + ivec2(1 << i, 0), 0).x;
-    uint right_len = texelFetch(rle_tex, ij + ivec2(1 << i, 0), 0).x;
-    uint out_len = this_len + right_len;
+    ivec2 ij_left = ij - ivec2(1 << i, 0);
+    uint this_data = texelFetch(cumsum_tex, ij, 0).x;
+    uint left_data = texelFetch(cumsum_tex, ij_left, 0).x;
+    uint this_len = this_data & uint(0x0fffffff);
+    uint left_len = left_data & uint(0x0fffffff);
     if (
-            1 << i < res                    // in bounds
-            && this_len == uint(1 << i)     // current value isn't limitted
-            && this_value == right_value    // values are in the same block
-        ){
-        frag_color = this_len + right_len;  // count
+            ij_left.x > 0                   // in bounds
+    ){
+        frag_color = (this_len + left_len) | (this_data & uint(0xf0000000));   // count
     } else {
-        frag_color = this_len;              // stop counting
+        frag_color = this_data;              // stop counting
     }
 }
 
@@ -172,8 +168,8 @@ void main(){
     uint count = count_uint & uint(0x0fffffff);
 
     frag_color = vec4(
-        float(count == uint(2)), 
-        float(count == uint(1)), 
+        0., 
+        float(count) / 15., 
         val, 
         1.
     );
@@ -225,6 +221,10 @@ function print_error(source, err){
 
 
 res = 512
+// textures:
+// 0 | value_tex | uint8
+// 1 | rle_tex_in/rle_tex_out | uint16
+// 2 | count_tex_in/count_tex_out | uint32
 
 
 function main(){
@@ -243,6 +243,7 @@ function main(){
     image_program = link_program(vs, compile_shader(image_src, gl.FRAGMENT_SHADER));
     rle_program = link_program(vs, compile_shader(rle_src, gl.FRAGMENT_SHADER));
     sum_prep_program = link_program(vs, compile_shader(sum_prep_src, gl.FRAGMENT_SHADER));
+    sum_program = link_program(vs, compile_shader(cumsum_src, gl.FRAGMENT_SHADER));
     canvas_program = link_program(vs, compile_shader(canvas_src, gl.FRAGMENT_SHADER));
 
     vert_buffer = gl.createBuffer();
@@ -370,15 +371,36 @@ function main(){
     gl.vertexAttribPointer(vert_attr, 2, gl.FLOAT, gl.FALSE, 2 * 4, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-    // swap textures
-    // [rle_in_texture, rle_out_texture] = [rle_out_texture, rle_in_texture];
-    // gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_out_texture, 0);
-    // gl.bindTexture(gl.TEXTURE_2D, rle_in_texture);
-    // return;
+    // cumsum again
+    gl.activeTexture(gl.TEXTURE0 + 2);
+    [cumsum_in_texture, cumsum_out_texture] = [cumsum_out_texture, cumsum_in_texture];
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, cumsum_out_texture, 0);
+    gl.bindTexture(gl.TEXTURE_2D, cumsum_in_texture);
+
+    for (i = 0; i < 9; i++){
+
+        // render to run_length_fbo
+        gl.useProgram(sum_program);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, cumsum_fbo);
+        gl.uniform1i(gl.getUniformLocation(sum_program, 'cumsum_tex'), 2);
+        gl.uniform1i(gl.getUniformLocation(sum_program, 'res'), res);
+        gl.uniform1i(gl.getUniformLocation(sum_program, 'i'), i);
+        gl.bindTexture(gl.TEXTURE_2D, cumsum_in_texture);
+        vert_attr = gl.getAttribLocation(sum_program, 'vert_pos');
+        gl.enableVertexAttribArray(vert_attr);
+        gl.vertexAttribPointer(vert_attr, 2, gl.FLOAT, gl.FALSE, 2 * 4, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        // swap textures
+        [cumsum_in_texture, cumsum_out_texture] = [cumsum_out_texture, cumsum_in_texture];
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, cumsum_out_texture, 0);
+        gl.bindTexture(gl.TEXTURE_2D, cumsum_in_texture);
+    }
+
     // render to canvas
     gl.useProgram(canvas_program);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.bindTexture(gl.TEXTURE_2D, rle_in_texture);
+    // gl.bindTexture(gl.TEXTURE_2D, rle_in_texture);
     gl.uniform1i(gl.getUniformLocation(canvas_program, 'value_tex'), 0);
     gl.uniform1i(gl.getUniformLocation(canvas_program, 'rle_tex'), 1);
     gl.uniform1i(gl.getUniformLocation(canvas_program, 'count_tex'), 2);
