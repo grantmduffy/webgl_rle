@@ -52,17 +52,18 @@ uniform int i;
 
 void main(){
     ivec2 ij = ivec2(gl_FragCoord.xy);
+    ivec2 ij_left = ij - ivec2(1 << i, 0);
     uint this_value = texelFetch(value_tex, ij, 0).x;
     uint this_len = texelFetch(rle_tex, ij, 0).x;
-    uint right_value = texelFetch(value_tex, ij + ivec2(1 << i, 0), 0).x;
-    uint right_len = texelFetch(rle_tex, ij + ivec2(1 << i, 0), 0).x;
-    uint out_len = this_len + right_len;
+    uint left_value = texelFetch(value_tex, ij_left, 0).x;
+    uint left_len = texelFetch(rle_tex, ij_left, 0).x;
+    uint out_len = this_len + left_len;
     if (
-            1 << i < res                    // in bounds
+            ij_left.x > 0                   // in bounds
             && this_len == uint(1 << i)     // current value isn't limitted
-            && this_value == right_value    // values are in the same block
-        ){
-        frag_color = this_len + right_len;  // count
+            && this_value == left_value     // values are in the same block
+    ){
+        frag_color = this_len + left_len;   // count
     } else {
         frag_color = this_len;              // stop counting
     }
@@ -91,6 +92,7 @@ void main(){
     ivec2 ij = ivec2(gl_FragCoord.xy);
     uint val = texelFetch(value_tex, ij, 0).x;
     uint len = texelFetch(rle_tex, ij, 0).x;
+    // frag_color = (val << 28) | (len & uint(0x0fffffff));
     if (val == uint(0) || val == uint(max_value)){
         if (((len - uint(1)) % uint(max_count_large - 1)) == uint(0)){
             frag_color = uint(2);
@@ -169,21 +171,12 @@ void main(){
     float val = float(count_uint >> 28) / float(max_value);
     uint count = count_uint & uint(0x0fffffff);
 
-    frag_color = vec4(0., 0., val, 1.);
-
-    switch (count) {
-        case uint(1):
-            frag_color.r = 1.;
-            break;
-        case uint(2):
-            frag_color.g = 1.;
-            break;
-    }
-
-    // len_uint = val_uint == uint(0x0000) || val_uint == uint(max_value) ? len_uint % uint(max_count_large) : len_uint % uint(max_count_small);
-    // float val = float(val_uint) / float(max_value)  ;
-    // float len = val_uint == uint(0x0000) || val_uint == uint(max_value) ? float(len_uint) / float(max_count_large) : float(len_uint) / float(max_count_small);
-    // frag_color = vec4(0., val, len, 1.);
+    frag_color = vec4(
+        float(count == uint(2)), 
+        float(count == uint(1)), 
+        val, 
+        1.
+    );
 }
 
 `;
