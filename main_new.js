@@ -78,6 +78,9 @@ void main(){
 
 rle_src = `#version 300 es
 
+#define max_run_small uint(15)
+#define max_run_large uint(127)
+
 precision highp float;
 precision highp int;
 precision highp sampler2D;
@@ -93,12 +96,38 @@ out uvec2 frag_color;
 
 void main(){
     ivec2 ij = ivec2(gl_FragCoord.xy);
+    ivec2 ij_left = ij - ivec2(1 << i, 0);
+    ivec2 ij_right = ij + ivec2(1 << i, 0);
+    uint this_value = texelFetch(value_tex, ij, 0).x;
+    uint left_value = texelFetch(value_tex, ij_left, 0).x;
+    uint right_value = texelFetch(value_tex, ij_right, 0).x;
+    uvec2 this_rle = texelFetch(rle_tex, ij, 0).xy;
+    uvec2 left_rle = texelFetch(rle_tex, ij_left, 0).xy;
+    uvec2 right_rle = texelFetch(rle_tex, ij_right, 0).xy;
+    
     switch (step) {
         case 0: // set to ones before run count
             frag_color = uvec2(1, ij.x);
             break;
         case 1: // do run count
-            frag_color = uvec2(7, 15);
+            if (
+                ij_left.x > 0 &&
+                this_rle.x == uint(1 << i) &&
+                this_value == left_value
+            ) {
+                frag_color = uvec2(
+                    this_rle.x + left_rle.x,
+                    this_rle.y
+                );
+            } else {
+                frag_color = this_rle;
+            }
+            break;
+        case 2:
+            frag_color = this_rle;
+            frag_color.x = ((this_value == uint(0)) || (this_value == uint(15))) ?
+                           (this_rle.x - uint(1)) % max_run_large + uint(1): 
+                           (this_rle.x - uint(1)) % max_run_small + uint(1);
             break;
         default:
             break;
@@ -121,6 +150,9 @@ void main(){
 
 canvas_src = `#version 300 es
 
+#define max_run_small uint(15)
+#define max_run_large uint(127)
+
 precision highp float;
 precision highp int;
 precision highp sampler2D;
@@ -137,7 +169,13 @@ void main(){
     ivec2 ij = ivec2(gl_FragCoord.xy);
     uint val = texelFetch(value_tex, ij, 0).x;
     uvec2 rle = texelFetch(rle_tex, ij, 0).xy;
-    frag_color = vec4(float(val) / 15., float(rle.x) / 512., float(rle.y) / 512., 1.);
+    // frag_color = vec4(float(val) / 15., float(rle.x) / 512., float(rle.y) / 512., 1.);
+    frag_color = vec4(
+        float(val) / float(max_run_small),
+        val == uint(0) || val == uint(15) ? float(rle.x) / float(max_run_large) : float(rle.x) / float(max_run_small),
+        float(rle.y) / 512.,
+        1.
+    );
 }`;
 
 /*
@@ -238,7 +276,14 @@ function main(){
     gl.useProgram(rle_program);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
     gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 0);
+    gl.uniform1i(gl.getUniformLocation(rle_program, 'i'), 0);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    // swap textures
+    [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
+    gl.activeTexture(gl.TEXTURE0 + 1);
+    gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
     
     gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 1);
     for (let i = 0; i < 9; i ++){
@@ -252,6 +297,15 @@ function main(){
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
     
     }
+
+    gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 2);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    // swap textures
+    [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
+    gl.activeTexture(gl.TEXTURE0 + 1);
+    gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
 
     // render to output
     gl.useProgram(output_program);
