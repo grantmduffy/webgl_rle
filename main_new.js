@@ -63,6 +63,7 @@ in vec2 xy;
 out uint frag_color;
 
 void main(){
+    ivec2 ij = ivec2(gl_FragCoord.xy);
     frag_color = uint(15) * uint(abs(length(xy - vec2(0.5, 0.5)) - 0.2) < 0.05);  // center ring
     frag_color = max(
         uint(10) * uint(length(xy - vec2(0.1, 0.9)) < 0.05),
@@ -72,6 +73,9 @@ void main(){
         uint(15. * float(xy.x > 0.9 && xy.y > 0.9) * (xy.x - 0.9) * 10.),
         frag_color
     );  // top right gradient
+    if (xy.x < 0.4 && xy.y < 0.2){
+        frag_color = ij.x % 2 == 0 ? uint(15) : uint(0);
+    }
 }
 
 `;
@@ -130,10 +134,20 @@ void main(){
             bool is_large = this_value == uint(0) || this_value == uint(15);
             if ((this_rle.x - 1) % (is_large ? max_run_large : max_run_small) == 0){
                 // new run
-                frag_color.x = is_large ? -1 : 0;
+                frag_color.x = is_large ? 1 : 0;
             } else {
                 // repeat value
-                frag_color.x = 1;
+                frag_color.x = -1;
+            }
+            frag_color.y = ij.x;
+            break;
+        case 3: // cumsum
+            ij_left = ij - ivec2(1 << i, 0);
+            left_value = texelFetch(value_tex, ij_left, 0).x;
+            left_rle = texelFetch(rle_tex, ij_left, 0).xy;
+            frag_color = this_rle;
+            if (ij_left.x >= 0){
+                frag_color.x += left_rle.x;
             }
             break;
         default:
@@ -179,15 +193,21 @@ void main(){
     ivec2 rle = texelFetch(rle_tex, ij, 0).xy;
     // frag_color = vec4(float(val) / 15., float(rle.x) / 512., float(rle.y) / 512., 1.);
     // frag_color = vec4(
-    //     float(val) / float(max_run_small),
+    //     float(val) / float(15.),
     //     val == uint(0) || val == uint(15) ? float(rle.x) / float(max_run_large) : float(rle.x) / float(max_run_small),
     //     float(rle.y) / 512.,
     //     1.
     // );
+    // frag_color = vec4(
+    //     float(val) / float(15.),
+    //     float(rle.x == 0),
+    //     float(rle.x == -1),
+    //     1.
+    // );
     frag_color = vec4(
-        float(val) / float(max_run_small),
-        float(rle.x == 0),
-        float(rle.x == -1),
+        float(rle.x) / 512.,
+        float(val) / float(15.),
+        float(-rle.x) / 512.,
         1.
     );
 }`;
@@ -299,31 +319,42 @@ function main(){
 
     // swap textures
     [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
-    gl.activeTexture(gl.TEXTURE0 + 1);
     gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
     
     gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 1);
-    for (let i = 0; i < n_sum; i ++){
+    for (let i = 0; i < n_sum; i++){
         gl.uniform1i(gl.getUniformLocation(rle_program, 'i'), i);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
 
         // swap textures
         [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
-        gl.activeTexture(gl.TEXTURE0 + 1);
         gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
     
     }
 
+    // prepare for cumsum
     gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 2);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
     // swap textures
     [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
-    gl.activeTexture(gl.TEXTURE0 + 1);
     gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
+
+    // cumsum
+    gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 3);
+    for (let i = 0; i < n_sum; i++){
+        gl.uniform1i(gl.getUniformLocation(rle_program, 'i'), i);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        // swap textures
+        [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
+        gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
+
+    }
 
     // render to output
     gl.useProgram(output_program);
