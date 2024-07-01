@@ -176,7 +176,11 @@ void main(){
                 // use default
                 frag_color = ivec2(0, -1);
             }
-
+            break;
+        case 5:
+            // post-process
+            frag_color = this_rle;
+            break;
         default:
             break;
     }
@@ -188,12 +192,53 @@ output_src = `#version 300 es
 precision highp float;
 precision highp int;
 precision highp sampler2D;
+precision highp usampler2D;
+precision highp isampler2D;
+
+uniform usampler2D value_tex;
+uniform isampler2D rle_tex;
+uniform usampler2D out_tex;
+uniform int res;
 
 in vec2 xy;
 out uint frag_color;
 
 void main(){
+    ivec2 this_ij;
+    ivec2 right_ij;
+    ivec2 this_rle;
+    ivec2 right_rle;
+    bool first_byte = true;
 
+    this_ij = ivec2(gl_FragCoord.xy);
+    this_rle = texelFetch(rle_tex, this_ij, 0).xy;
+    if (this_rle.y == -1){
+        this_ij += ivec2(1, 0);
+        this_rle = texelFetch(rle_tex, this_ij, 0).xy;
+        first_byte = false;
+    }
+    if (this_rle.y == -1){
+        frag_color = uint(0);
+        return;
+    }
+    uint this_value = texelFetch(value_tex, ivec2(this_rle.y, this_ij.y), 0).x;
+    right_ij = this_ij + ivec2(1, 0);
+    right_rle = texelFetch(rle_tex, right_ij, 0).xy;
+    if (right_rle.y == -1){
+        right_ij += ivec2(1, 0);
+        right_rle = texelFetch(rle_tex, right_ij, 0).xy;
+    }
+    int run_length = right_rle.y - this_rle.y;
+    if (this_value == uint(0) || this_value == uint(15)){
+        if (first_byte) {
+            frag_color = this_value << 4 | uint(run_length & 0x0f00) >> 8;
+        } else {
+            frag_color = uint(run_length & 0x00ff);
+        }
+    } else {
+        frag_color = this_value << 4 | uint(run_length & 0x0f);
+        // frag_color = uint(run_length & 0x0f);
+    }
 }`;
 
 canvas_src = `#version 300 es
@@ -210,6 +255,7 @@ precision highp isampler2D;
 uniform usampler2D value_tex;
 uniform isampler2D rle_tex;
 uniform usampler2D out_tex;
+uniform int res;
 
 in vec2 xy;
 out vec4 frag_color;
@@ -218,25 +264,16 @@ void main(){
     ivec2 ij = ivec2(gl_FragCoord.xy);
     uint val = texelFetch(value_tex, ij, 0).x;
     ivec2 rle = texelFetch(rle_tex, ij, 0).xy;
-    // frag_color = vec4(float(val) / 15., float(rle.x) / 512., float(rle.y) / 512., 1.);
-    // frag_color = vec4(
-    //     float(val) / float(15.),
-    //     val == uint(0) || val == uint(15) ? float(rle.x) / float(max_run_large) : float(rle.x) / float(max_run_small),
-    //     float(rle.y) / 512.,
-    //     1.
-    // );
-    // frag_color = vec4(
-    //     float(val) / float(15.),
-    //     float(rle.x == 0),
-    //     float(rle.x == -1),
-    //     1.
-    // );
+    if (rle.y == -1 && ij.x < res - 1){
+        rle = texelFetch(rle_tex, ij + ivec2(1, 0), 0).xy;
+    }
+    int source_idx = rle.y;
+    uint source_val = texelFetch(value_tex, ivec2(source_idx, ij.y), 0).x;
+    uint out_byte = texelFetch(out_tex, ij, 0).x;
     frag_color = vec4(
-        rle.y == -1 ? 0. : float(rle.x) / 512.,
-        // float(rle.y == -1), 
-        // float(val) / float(15.),
         0.,
-        rle.y == -1 ? 0. : float(-rle.x) / 512.,
+        0.,
+        float(out_byte) / 255.,
         1.
     );
 }`;
@@ -288,6 +325,7 @@ function main(){
         gl.uniform1i(gl.getUniformLocation(program, 'value_tex'), 0);
         gl.uniform1i(gl.getUniformLocation(program, 'rle_tex'), 1);
         gl.uniform1i(gl.getUniformLocation(program, 'out_tex'), 2);
+        gl.uniform1i(gl.getUniformLocation(program, 'res'), res);
     }
     
     // TEXTURE 0: value texture, uint8
@@ -344,7 +382,6 @@ function main(){
     gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 0);
     gl.uniform1i(gl.getUniformLocation(rle_program, 'i'), 0);
     gl.uniform1i(gl.getUniformLocation(rle_program, 'n'), n_sum);
-    gl.uniform1i(gl.getUniformLocation(rle_program, 'res'), res);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
     // swap textures
@@ -401,6 +438,7 @@ function main(){
     // render to output
     gl.useProgram(output_program);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, out_texture, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
 
     // render to canvas
     gl.useProgram(canvas_program);
