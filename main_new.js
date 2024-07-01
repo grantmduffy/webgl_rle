@@ -83,7 +83,7 @@ void main(){
 rle_src = `#version 300 es
 
 #define max_run_small 15
-#define max_run_large 127
+#define max_run_large 0x0fff
 
 precision highp float;
 precision highp int;
@@ -96,7 +96,7 @@ uniform isampler2D rle_tex;
 uniform int step;
 uniform int i;
 uniform int n;
-uniform int res;
+uniform int width;
 
 in vec2 xy;
 out ivec2 frag_color;
@@ -161,7 +161,7 @@ void main(){
             if (ij_left.x >= 0 && left_rle.y != -1 && left_rle.x > 0 && bool(left_rle.x & left_mask)) {
                 // use left
                 frag_color = left_rle;
-            } else if (ij_right.x < res && right_rle.y != -1 && right_rle.x < 0 && bool(-right_rle.x & right_mask)) {
+            } else if (ij_right.x < width && right_rle.y != -1 && right_rle.x < 0 && bool(-right_rle.x & right_mask)) {
                 // use right
                 frag_color = right_rle;
             } else if (
@@ -198,7 +198,7 @@ precision highp isampler2D;
 uniform usampler2D value_tex;
 uniform isampler2D rle_tex;
 uniform usampler2D out_tex;
-uniform int res;
+uniform int width;
 
 in vec2 xy;
 out uint frag_color;
@@ -244,7 +244,7 @@ void main(){
 canvas_src = `#version 300 es
 
 #define max_run_small uint(15)
-#define max_run_large uint(127)
+#define max_run_large uint(0x0fff)
 
 precision highp float;
 precision highp int;
@@ -255,7 +255,8 @@ precision highp isampler2D;
 uniform usampler2D value_tex;
 uniform isampler2D rle_tex;
 uniform usampler2D out_tex;
-uniform int res;
+uniform int width;
+uniform int height;
 
 in vec2 xy;
 out vec4 frag_color;
@@ -264,7 +265,7 @@ void main(){
     ivec2 ij = ivec2(gl_FragCoord.xy);
     uint val = texelFetch(value_tex, ij, 0).x;
     ivec2 rle = texelFetch(rle_tex, ij, 0).xy;
-    if (rle.y == -1 && ij.x < res - 1){
+    if (rle.y == -1 && ij.x < width - 1){
         rle = texelFetch(rle_tex, ij + ivec2(1, 0), 0).xy;
     }
     int source_idx = rle.y;
@@ -272,7 +273,7 @@ void main(){
     uint out_byte = texelFetch(out_tex, ij, 0).x;
     frag_color = vec4(
         0.,
-        0.,
+        float(ij.y) / float(height),
         float(out_byte) / 255.,
         1.
     );
@@ -285,13 +286,13 @@ uint   uint8  texture2 output
 */
 
 
-const res = 512;
-const n_sum = 9;
-
 function main(){
 
     // setup gl
     let canvas = document.getElementById('canvas');
+    let width = canvas.width;
+    let height = canvas.height;
+    let n_sum = Math.ceil(Math.log2(width * height))
     gl = canvas.getContext('webgl2', {preserveDrawingBuffer: true});
     gl.getExtension("OES_texture_float_linear");
     gl.getExtension("EXT_color_buffer_float");
@@ -325,7 +326,9 @@ function main(){
         gl.uniform1i(gl.getUniformLocation(program, 'value_tex'), 0);
         gl.uniform1i(gl.getUniformLocation(program, 'rle_tex'), 1);
         gl.uniform1i(gl.getUniformLocation(program, 'out_tex'), 2);
-        gl.uniform1i(gl.getUniformLocation(program, 'res'), res);
+        gl.uniform1i(gl.getUniformLocation(program, 'width'), width);
+        gl.uniform1i(gl.getUniformLocation(program, 'height'), height);
+        gl.uniform1i(gl.getUniformLocation(program, 'n'), n_sum);
     }
     
     // TEXTURE 0: value texture, uint8
@@ -334,8 +337,8 @@ function main(){
     gl.bindTexture(gl.TEXTURE_2D, value_texture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8UI, res, res, 0, gl.RED_INTEGER, gl.UNSIGNED_BYTE, 
-        new Uint8Array(Array(res * res).fill(0).flat()));
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8UI, width, height, 0, gl.RED_INTEGER, gl.UNSIGNED_BYTE, 
+        new Uint8Array(Array(width * height).fill(0).flat()));
     
     // TEXTURE 1: cumsum texture, uint16 uvec2
     gl.activeTexture(gl.TEXTURE0 + 1);
@@ -343,14 +346,14 @@ function main(){
     gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32I, res, res, 0, gl.RG_INTEGER, gl.INT, 
-        new Int32Array(Array(res * res * 2).fill(-1).flat()));
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32I, width, height, 0, gl.RG_INTEGER, gl.INT, 
+        new Int32Array(Array(width * height * 2).fill(-1).flat()));
     var rle_texture_out = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, rle_texture_out);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32I, res, res, 0, gl.RG_INTEGER, gl.INT, 
-        new Int32Array(Array(res * res * 2).fill(-1).flat()));
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32I, width, height, 0, gl.RG_INTEGER, gl.INT, 
+        new Int32Array(Array(width * height * 2).fill(-1).flat()));
     
     // TEXTURE 2: output texture, uint8
     gl.activeTexture(gl.TEXTURE0 + 2);
@@ -358,14 +361,14 @@ function main(){
     gl.bindTexture(gl.TEXTURE_2D, out_texture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8UI, res, res, 0, gl.RED_INTEGER, gl.UNSIGNED_BYTE, 
-        new Uint8Array(Array(res * res).fill(0).flat()));
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8UI, width, height, 0, gl.RED_INTEGER, gl.UNSIGNED_BYTE, 
+        new Uint8Array(Array(width * height).fill(0).flat()));
 
     // setup fbo, use same fbo but swap color attachment0
     fbo = gl.createFramebuffer();
     depthbuffer = gl.createRenderbuffer();
     gl.bindRenderbuffer(gl.RENDERBUFFER, depthbuffer);
-    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, res, res);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, width, height);
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
     gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depthbuffer);
     
