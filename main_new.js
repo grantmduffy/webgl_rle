@@ -66,14 +66,14 @@ void main(){
     ivec2 ij = ivec2(gl_FragCoord.xy);
     frag_color = uint(15) * uint(abs(length(xy - vec2(0.5, 0.5)) - 0.2) < 0.05);  // center ring
     frag_color = max(
-        uint(10) * uint(length(xy - vec2(0.1, 0.9)) < 0.05),
+        uint(10) * uint(length(xy - vec2(0.1, 0.1)) < 0.05),
         frag_color
-    );  // top left circle
+    );  // bottom left circle
     frag_color = max(
-        uint(15. * float(xy.x > 0.9 && xy.y > 0.9) * (xy.x - 0.9) * 10.),
+        uint(15. * float(xy.x > 0.9 && xy.y > 0.7) * (xy.x - 0.9) * 10.),
         frag_color
     );  // top right gradient
-    if (xy.x < 0.4 && xy.y < 0.2){
+    if (xy.y > 0.9){
         frag_color = ij.x % 2 == 0 ? uint(15) : uint(0);
     }
 }
@@ -83,7 +83,8 @@ void main(){
 rle_src = `#version 300 es
 
 #define max_run_small 15
-#define max_run_large 0x0fff
+// #define max_run_large 0x0fff
+#define max_run_large 200
 
 precision highp float;
 precision highp int;
@@ -93,10 +94,7 @@ precision highp isampler2D;
 
 uniform usampler2D value_tex;
 uniform isampler2D rle_tex;
-uniform int step;
-uniform int i;
-uniform int n;
-uniform int width;
+uniform int step, i, n, width, height;
 
 in vec2 xy;
 out ivec2 frag_color;
@@ -104,6 +102,15 @@ out ivec2 frag_color;
 ivec2 ij, ij_left, ij_right;
 uint this_value, left_value, right_value;
 ivec2 this_rle, left_rle, right_rle;
+int idx, idx_left, idx_right;
+
+int ij2idx(ivec2 ij){
+    return (height - ij.y - 1) * width + ij.x;
+}
+
+ivec2 idx2ij(int idx){
+    return ivec2(idx % width, height - idx / width - 1);
+}
 
 void main(){
     ij = ivec2(gl_FragCoord.xy);
@@ -115,11 +122,13 @@ void main(){
             frag_color = ivec2(1, ij.x);
             break;
         case 1: // do run count
-            ij_left = ij - ivec2(1 << i, 0);
+            idx = ij2idx(ij);
+            idx_left = idx - (1 << i);
+            ij_left = idx2ij(idx_left);
             left_value = texelFetch(value_tex, ij_left, 0).x;
             left_rle = texelFetch(rle_tex, ij_left, 0).xy;
             if (
-                ij_left.x > 0 &&
+                idx_left >= 0 &&
                 this_rle.x == 1 << i &&
                 this_value == left_value
             ) {
@@ -142,7 +151,9 @@ void main(){
             }
             break;
         case 3: // cumsum
-            ij_left = ij - ivec2(1 << i, 0);
+            idx = ij2idx(ij);
+            idx_left = idx - (1 << i);
+            ij_left = idx2ij(idx_left);
             left_value = texelFetch(value_tex, ij_left, 0).x;
             left_rle = texelFetch(rle_tex, ij_left, 0).xy;
             frag_color = this_rle;
@@ -153,15 +164,19 @@ void main(){
         case 4: // gather
             int left_mask = 1 << (n - i - 1);
             int right_mask = 1 << i;
-            ij_left = ij - ivec2(left_mask, 0);
+
+            idx = ij2idx(ij);
+            idx_left = idx - left_mask;
+            idx_right = idx + right_mask;
+            ij_left = idx2ij(idx_left);
+            ij_right = idx2ij(idx_right);
             left_rle = texelFetch(rle_tex, ij_left, 0).xy;
-            ij_right = ij + ivec2(right_mask, 0);
             right_rle = texelFetch(rle_tex, ij_right, 0).xy;
 
-            if (ij_left.x >= 0 && left_rle.y != -1 && left_rle.x > 0 && bool(left_rle.x & left_mask)) {
+            if (idx_left >= 0 && left_rle.y != -1 && left_rle.x > 0 && bool(left_rle.x & left_mask)) {
                 // use left
                 frag_color = left_rle;
-            } else if (ij_right.x < width && right_rle.y != -1 && right_rle.x < 0 && bool(-right_rle.x & right_mask)) {
+            } else if (idx_right < width * height && right_rle.y != -1 && right_rle.x < 0 && bool(-right_rle.x & right_mask)) {
                 // use right
                 frag_color = right_rle;
             } else if (
@@ -265,17 +280,23 @@ void main(){
     ivec2 ij = ivec2(gl_FragCoord.xy);
     uint val = texelFetch(value_tex, ij, 0).x;
     ivec2 rle = texelFetch(rle_tex, ij, 0).xy;
-    if (rle.y == -1 && ij.x < width - 1){
-        rle = texelFetch(rle_tex, ij + ivec2(1, 0), 0).xy;
-    }
     int source_idx = rle.y;
     uint source_val = texelFetch(value_tex, ivec2(source_idx, ij.y), 0).x;
     uint out_byte = texelFetch(out_tex, ij, 0).x;
+    // frag_color = vec4(
+    //     float(rle.x == -1),
+    //     float(rle.x == 0),
+    //     float(rle.x == 1),
+    //     1.
+    // );
+    // frag_color = vec4(
+    //     float(rle.x) / float(width * height),
+    //     -float(rle.x) / float(width * height),
+    //     float(rle.y != -1) * 0.2,
+    //     1.
+    // );
     frag_color = vec4(
-        0.,
-        float(ij.y) / float(height),
-        float(out_byte) / 255.,
-        1.
+        float(out_byte) / 255.
     );
 }`;
 
@@ -384,7 +405,6 @@ function main(){
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
     gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 0);
     gl.uniform1i(gl.getUniformLocation(rle_program, 'i'), 0);
-    gl.uniform1i(gl.getUniformLocation(rle_program, 'n'), n_sum);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
     // swap textures
