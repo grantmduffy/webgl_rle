@@ -73,7 +73,7 @@ void main(){
         uint(15. * float(xy.x > 0.9 && xy.y > 0.7) * (xy.x - 0.9) * 10.),
         frag_color
     );  // top right gradient
-    if (xy.y > 0.9){
+    if (xy.y > 0.98 && xy.x < 0.8){
         frag_color = ij.x % 2 == 0 ? uint(15) : uint(0);
     }
 }
@@ -106,10 +106,12 @@ int idx, idx_left, idx_right;
 
 int ij2idx(ivec2 ij){
     return (height - ij.y - 1) * width + ij.x;
+    // return ij.y * width + ij.x;
 }
 
 ivec2 idx2ij(int idx){
     return ivec2(idx % width, height - idx / width - 1);
+    // return ivec2(idx % width, idx / width);
 }
 
 void main(){
@@ -141,10 +143,11 @@ void main(){
             }
             break;
         case 2: // prepare for cumsum
+            idx = ij2idx(ij);
             bool is_large = this_value == uint(0) || this_value == uint(15);
             if ((this_rle.x - 1) % (is_large ? max_run_large : max_run_small) == 0){
                 // new run
-                frag_color = ivec2(is_large ? 1 : 0, ij.x);
+                frag_color = ivec2(is_large ? 1 : 0, idx);
             } else {
                 // repeat value
                 frag_color = ivec2(-1, -1);
@@ -181,6 +184,7 @@ void main(){
                 frag_color = right_rle;
             } else if (
                     this_rle.y != -1 && (
+                        this_rle.x == 0 ||
                         (this_rle.x >= 0 && !bool(this_rle.x & left_mask)) || 
                         (this_rle.x < 0 && !bool(-this_rle.x & right_mask))
                     )
@@ -223,14 +227,14 @@ void main(){
     ivec2 right_ij;
     ivec2 this_rle;
     ivec2 right_rle;
-    bool first_byte = true;
+    bool first_byte = false;
 
     this_ij = ivec2(gl_FragCoord.xy);
     this_rle = texelFetch(rle_tex, this_ij, 0).xy;
     if (this_rle.y == -1){
         this_ij += ivec2(1, 0);
         this_rle = texelFetch(rle_tex, this_ij, 0).xy;
-        first_byte = false;
+        first_byte = true;
     }
     if (this_rle.y == -1){
         frag_color = uint(0);
@@ -296,7 +300,12 @@ void main(){
     //     1.
     // );
     frag_color = vec4(
-        float(out_byte) / 255.
+        float(rle.x > 0),
+        // float(out_byte) / 255.,
+        // float(val) / 15.,
+        0.,
+        float(rle.x < 0),
+        1.
     );
 }`;
 
@@ -313,13 +322,15 @@ function main(){
     let canvas = document.getElementById('canvas');
     let width = canvas.width;
     let height = canvas.height;
-    let n_sum = Math.ceil(Math.log2(width * height))
+    n_sum = Math.ceil(Math.log2(width * height))
+
     gl = canvas.getContext('webgl2', {preserveDrawingBuffer: true});
     gl.getExtension("OES_texture_float_linear");
     gl.getExtension("EXT_color_buffer_float");
     gl.getExtension("EXT_float_blend");
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     gl.pixelStorei(gl.PACK_ALIGNMENT, 1);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
     gl.disable(gl.DITHER);
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.CULL_FACE);
@@ -387,7 +398,7 @@ function main(){
 
     // setup fbo, use same fbo but swap color attachment0
     fbo = gl.createFramebuffer();
-    depthbuffer = gl.createRenderbuffer();
+    let depthbuffer = gl.createRenderbuffer();
     gl.bindRenderbuffer(gl.RENDERBUFFER, depthbuffer);
     gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, width, height);
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
@@ -446,22 +457,60 @@ function main(){
 
     }
 
+    let download_el = document.createElement('a');
+    let gather_steps = [];
+    let download_buffer = new Int32Array(width * height * 2);
+
     // gather
     gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 4);
     for (let i = 0; i < n_sum; i++){
         gl.uniform1i(gl.getUniformLocation(rle_program, 'i'), i);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
 
+        // download gather step
+        gl.readPixels(0, 0, width, height, gl.RG_INTEGER, gl.INT, download_buffer, 0);
+        gather_steps.push(download_buffer.slice());
+
         // swap textures
         [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
         gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
     }
+    download_el.href = window.URL.createObjectURL(new Blob(gather_steps, {type: 'application/octet-stream'}));
+    download_el.download = 'gather_steps.bin';
+    console.log(download_el.download);
+    download_el.click();
+    
+    // swap textures
+    [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
+    gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
+
+    // download buffer from gpu
+    let rle_buffer = new Int32Array(width * height * 2);
+    gl.readPixels(0, 0, width, height, gl.RG_INTEGER, gl.INT, rle_buffer, 0);
+    let rle_blob = new Blob([rle_buffer], {type: 'application/octet-stream'});
+    let rle_link = document.getElementById('rle-download');
+    rle_link.href = window.URL.createObjectURL(rle_blob);
+    rle_link.download = 'rle_buffer.bin';
+
+    // swap textures
+    [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
+    gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
 
     // render to output
     gl.useProgram(output_program);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, out_texture, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    // download buffer from gpu
+    let buffer = new Uint8Array(width * height);
+    gl.readPixels(0, 0, width, height, gl.RED_INTEGER, gl.UNSIGNED_BYTE, buffer, 0);
+    let blob = new Blob([buffer], {type: 'application/octet-stream'});
+    let link = document.getElementById('download');
+    link.href = window.URL.createObjectURL(blob);
+    link.download = 'rle_output.bin';
 
     // render to canvas
     gl.useProgram(canvas_program);
