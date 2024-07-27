@@ -142,18 +142,30 @@ void main(){
                 frag_color = this_rle;
             }
             break;
-        case 2: // prepare for cumsum
+        case 2: // prepare for repeat count
             idx = ij2idx(ij);
             bool is_large = this_value == uint(0) || this_value == uint(15);
             if ((this_rle.x - 1) % (is_large ? max_run_large : max_run_small) == 0){
                 // new run
-                frag_color = ivec2(is_large ? 1 : 0, idx);
+                frag_color = ivec2(0, idx);
             } else {
                 // repeat value
-                frag_color = ivec2(-1, -1);
+                frag_color = ivec2(1, -1);
             }
             break;
-        case 3: // cumsum
+        case 3: // prepare for double count
+            // get source value
+            int idx_src = this_rle.y;
+            ivec2 ij_src = idx2ij(idx_src);
+            uint src_value = texelFetch(value_tex, ij_src, 0).x;
+            frag_color = this_rle;
+            if (idx_src > 0 && (src_value == uint(0) || src_value == uint(15))){
+                frag_color.x = 1;
+            } else {
+                frag_color.x = 0;
+            }
+            break;
+        case 4: // cumsum
             idx = ij2idx(ij);
             idx_left = idx - (1 << i);
             ij_left = idx2ij(idx_left);
@@ -164,31 +176,18 @@ void main(){
                 frag_color.x += left_rle.x;
             }
             break;
-        case 4: // gather
-            int left_mask = 1 << (n - i - 1);
+        case 5: // gather left
             int right_mask = 1 << i;
 
             idx = ij2idx(ij);
-            idx_left = idx - left_mask;
             idx_right = idx + right_mask;
-            ij_left = idx2ij(idx_left);
             ij_right = idx2ij(idx_right);
-            left_rle = texelFetch(rle_tex, ij_left, 0).xy;
             right_rle = texelFetch(rle_tex, ij_right, 0).xy;
 
-            if (idx_left >= 0 && left_rle.y != -1 && left_rle.x > 0 && bool(left_rle.x & left_mask)) {
-                // use left
-                frag_color = left_rle;
-            } else if (idx_right < width * height && right_rle.y != -1 && right_rle.x < 0 && bool(-right_rle.x & right_mask)) {
+            if (idx_right < width * height && right_rle.y != -1 && bool(right_rle.x & right_mask)) {
                 // use right
                 frag_color = right_rle;
-            } else if (
-                    this_rle.y != -1 && (
-                        this_rle.x == 0 ||
-                        (this_rle.x >= 0 && !bool(this_rle.x & left_mask)) || 
-                        (this_rle.x < 0 && !bool(-this_rle.x & right_mask))
-                    )
-                ) {
+            } else if (this_rle.y != -1 && !bool(this_rle.x & right_mask)) {
                 // use this
                 frag_color = this_rle;
             } else {
@@ -196,7 +195,26 @@ void main(){
                 frag_color = ivec2(0, -1);
             }
             break;
-        case 5:
+        case 6: // expand right
+            int left_mask = 1 << (n - i - 1);
+
+            idx = ij2idx(ij);
+            idx_left = idx - left_mask;
+            ij_left = idx2ij(idx_left);
+            left_rle = texelFetch(rle_tex, ij_left, 0).xy;
+
+            if (idx_left >= 0 && left_rle.y != -1 && bool(left_rle.x & left_mask)) {
+                // use left
+                frag_color = left_rle;
+            } else if (this_rle.y != -1 && !bool(this_rle.x & left_mask)) {
+                // use this
+                frag_color = this_rle;
+            } else {
+                // default
+                frag_color = ivec2(0, -1);
+            }
+            break;
+        case 7:
             // post-process
             frag_color = this_rle;
             break;
@@ -260,7 +278,7 @@ void main(){
     }
 }`;
 
-canvas_src = `#version 300 es
+const newLocal = canvas_src = `#version 300 es
 
 #define max_run_small uint(15)
 #define max_run_large uint(0x0fff)
@@ -280,31 +298,28 @@ uniform int height;
 in vec2 xy;
 out vec4 frag_color;
 
+int ij2idx(ivec2 ij){
+    return (height - ij.y - 1) * width + ij.x;
+    // return ij.y * width + ij.x;
+}
+
+ivec2 idx2ij(int idx){
+    return ivec2(idx % width, height - idx / width - 1);
+    // return ivec2(idx % width, idx / width);
+}
+
 void main(){
     ivec2 ij = ivec2(gl_FragCoord.xy);
     uint val = texelFetch(value_tex, ij, 0).x;
     ivec2 rle = texelFetch(rle_tex, ij, 0).xy;
     int source_idx = rle.y;
-    uint source_val = texelFetch(value_tex, ivec2(source_idx, ij.y), 0).x;
+    ivec2 source_ij = idx2ij(source_idx);
+    uint source_val = texelFetch(value_tex, source_ij, 0).x;
     uint out_byte = texelFetch(out_tex, ij, 0).x;
-    // frag_color = vec4(
-    //     float(rle.x == -1),
-    //     float(rle.x == 0),
-    //     float(rle.x == 1),
-    //     1.
-    // );
-    // frag_color = vec4(
-    //     float(rle.x) / float(width * height),
-    //     -float(rle.x) / float(width * height),
-    //     float(rle.y != -1) * 0.2,
-    //     1.
-    // );
     frag_color = vec4(
-        float(rle.x > 0),
-        // float(out_byte) / 255.,
-        // float(val) / 15.,
-        0.,
-        float(rle.x < 0),
+        float(rle.x) / 10000.,
+        float(source_val) / 15.,
+        float(rle.y != -1),
         1.
     );
 }`;
@@ -423,6 +438,7 @@ function main(){
     gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
     
+    // limited cumsum to find run starts
     gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 1);
     for (let i = 0; i < n_sum; i++){
         gl.uniform1i(gl.getUniformLocation(rle_program, 'i'), i);
@@ -435,7 +451,7 @@ function main(){
     
     }
 
-    // prepare for cumsum
+    // prepare to count repeats
     gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 2);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
@@ -444,42 +460,67 @@ function main(){
     gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
 
-    // cumsum
-    gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 3);
-    for (let i = 0; i < n_sum; i++){
-        gl.uniform1i(gl.getUniformLocation(rle_program, 'i'), i);
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-        // swap textures
-        [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
-        gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
-
-    }
-
-    let download_el = document.createElement('a');
-    let gather_steps = [];
-    let download_buffer = new Int32Array(width * height * 2);
-
-    // gather
+    // cumsum to count repeats (to get moves left)
     gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 4);
     for (let i = 0; i < n_sum; i++){
         gl.uniform1i(gl.getUniformLocation(rle_program, 'i'), i);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-        // download gather step
-        gl.readPixels(0, 0, width, height, gl.RG_INTEGER, gl.INT, download_buffer, 0);
-        gather_steps.push(download_buffer.slice());
+        // swap textures
+        [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
+        gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
+
+    }
+
+    // TODO: read last pixel to get number of repeats
+
+    // gather left
+    gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 5);
+    for (let i = 0; i < n_sum; i++){
+        gl.uniform1i(gl.getUniformLocation(rle_program, 'i'), i);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
 
         // swap textures
         [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
         gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
     }
-    download_el.href = window.URL.createObjectURL(new Blob(gather_steps, {type: 'application/octet-stream'}));
-    download_el.download = 'gather_steps.bin';
-    console.log(download_el.download);
-    download_el.click();
+
+    // prepare to count doubles
+    gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 3);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    // swap textures
+    [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
+    gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
+
+    // cumsum to count doubles (to get moves left)
+    gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 4);
+    for (let i = 0; i < n_sum; i++){
+        gl.uniform1i(gl.getUniformLocation(rle_program, 'i'), i);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        // swap textures
+        [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
+        gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
+    }
+
+    // TODO: read last pixel to get number of doubles
+
+    // gather right
+    gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 6);
+    for (let i = 0; i < n_sum; i++){
+        gl.uniform1i(gl.getUniformLocation(rle_program, 'i'), i);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        // swap textures
+        [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
+        gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
+    }
     
     // swap textures
     [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
