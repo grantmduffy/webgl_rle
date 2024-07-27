@@ -330,6 +330,15 @@ uivec2 uint16 texture1 cumsum/idx swap-pair
 uint   uint8  texture2 output
 */
 
+var rle_texture_in = null;
+var rle_texture_out = null;
+
+function swap_textures(){
+    [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
+    gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
+}
+
 
 function main(){
 
@@ -389,13 +398,13 @@ function main(){
     
     // TEXTURE 1: cumsum texture, uint16 uvec2
     gl.activeTexture(gl.TEXTURE0 + 1);
-    var rle_texture_in = gl.createTexture();
+    rle_texture_in = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32I, width, height, 0, gl.RG_INTEGER, gl.INT, 
         new Int32Array(Array(width * height * 2).fill(-1).flat()));
-    var rle_texture_out = gl.createTexture();
+    rle_texture_out = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, rle_texture_out);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -434,9 +443,7 @@ function main(){
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
     // swap textures
-    [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
-    gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
+    swap_textures();
     
     // limited cumsum to find run starts
     gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 1);
@@ -445,9 +452,7 @@ function main(){
         gl.drawArrays(gl.TRIANGLES, 0, 6);
 
         // swap textures
-        [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
-        gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
+        swap_textures();
     
     }
 
@@ -456,9 +461,7 @@ function main(){
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
     // swap textures
-    [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
-    gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
+    swap_textures();
 
     // cumsum to count repeats (to get moves left)
     gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 4);
@@ -467,9 +470,7 @@ function main(){
         gl.drawArrays(gl.TRIANGLES, 0, 6);
 
         // swap textures
-        [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
-        gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
+        swap_textures();
 
     }
 
@@ -482,9 +483,7 @@ function main(){
         gl.drawArrays(gl.TRIANGLES, 0, 6);
 
         // swap textures
-        [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
-        gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
+        swap_textures();
     }
 
     // prepare to count doubles
@@ -503,9 +502,7 @@ function main(){
         gl.drawArrays(gl.TRIANGLES, 0, 6);
 
         // swap textures
-        [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
-        gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
+        swap_textures();
     }
 
     // TODO: read last pixel to get number of doubles
@@ -517,15 +514,11 @@ function main(){
         gl.drawArrays(gl.TRIANGLES, 0, 6);
 
         // swap textures
-        [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
-        gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
+        swap_textures();
     }
     
     // swap textures
-    [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
-    gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
+    swap_textures();
 
     // download buffer from gpu
     let rle_buffer = new Int32Array(width * height * 2);
@@ -536,9 +529,7 @@ function main(){
     rle_link.download = 'rle_buffer.bin';
 
     // swap textures
-    [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
-    gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
+    swap_textures();
 
     // render to output
     gl.useProgram(output_program);
