@@ -318,8 +318,9 @@ void main(){
     uint out_byte = texelFetch(out_tex, ij, 0).x;
     frag_color = vec4(
         float(rle.x) / 10000.,
-        float(source_val) / 15.,
-        float(rle.y != -1),
+        0., 0.,
+        // float(source_val) / 15.,
+        // float(rle.y != -1),
         1.
     );
 }`;
@@ -332,6 +333,7 @@ uint   uint8  texture2 output
 
 var rle_texture_in = null;
 var rle_texture_out = null;
+var rle_program = null;
 
 function swap_textures(){
     [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
@@ -339,13 +341,22 @@ function swap_textures(){
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
 }
 
+function run_step(step, n=1){
+    gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), step);
+    for (let i = 0; i < n; i++){
+        gl.uniform1i(gl.getUniformLocation(rle_program, 'i'), i);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        swap_textures();
+    }
+}
+
 
 function main(){
 
     // setup gl
     let canvas = document.getElementById('canvas');
-    let width = canvas.width;
-    let height = canvas.height;
+    width = canvas.width;
+    height = canvas.height;
     n_sum = Math.ceil(Math.log2(width * height))
 
     gl = canvas.getContext('webgl2', {preserveDrawingBuffer: true});
@@ -362,7 +373,7 @@ function main(){
     // compile programs
     let vs = compile_shader(vs_src, gl.VERTEX_SHADER);
     let value_program = link_program(vs, compile_shader(value_src, gl.FRAGMENT_SHADER));
-    let rle_program = link_program(vs, compile_shader(rle_src, gl.FRAGMENT_SHADER));
+    rle_program = link_program(vs, compile_shader(rle_src, gl.FRAGMENT_SHADER));
     let output_program = link_program(vs, compile_shader(output_src, gl.FRAGMENT_SHADER));
     let canvas_program = link_program(vs, compile_shader(canvas_src, gl.FRAGMENT_SHADER));
     let programs = [value_program, rle_program, output_program, canvas_program];
@@ -433,103 +444,46 @@ function main(){
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, value_texture, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     
-    // do rle
+    // find repeats
     gl.useProgram(rle_program);
     gl.activeTexture(gl.TEXTURE0 + 1);
     gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
-    gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 0);
-    gl.uniform1i(gl.getUniformLocation(rle_program, 'i'), 0);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-    // swap textures
-    swap_textures();
+    run_step(0);
     
     // limited cumsum to find run starts
-    gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 1);
-    for (let i = 0; i < n_sum; i++){
-        gl.uniform1i(gl.getUniformLocation(rle_program, 'i'), i);
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-        // swap textures
-        swap_textures();
-    
-    }
+    run_step(1, n_sum);
 
     // prepare to count repeats
-    gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 2);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-    // swap textures
-    swap_textures();
+    run_step(2);
 
     // cumsum to count repeats (to get moves left)
-    gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 4);
-    for (let i = 0; i < n_sum; i++){
-        gl.uniform1i(gl.getUniformLocation(rle_program, 'i'), i);
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-        // swap textures
-        swap_textures();
-
-    }
+    run_step(4, n_sum);
 
     // TODO: read last pixel to get number of repeats
+    swap_textures();
+    repeat_count = new Int32Array(2);
+    gl.readPixels(width - 1, 0, 1, 1, gl.RG_INTEGER, gl.INT, repeat_count, 0);
+    swap_textures();
 
     // gather left
-    gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 5);
-    for (let i = 0; i < n_sum; i++){
-        gl.uniform1i(gl.getUniformLocation(rle_program, 'i'), i);
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-        // swap textures
-        swap_textures();
-    }
+    run_step(5, n_sum);
 
     // prepare to count doubles
-    gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 3);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    run_step(3);
 
-    // swap textures
-    [rle_texture_in, rle_texture_out] = [rle_texture_out, rle_texture_in];
-    gl.bindTexture(gl.TEXTURE_2D, rle_texture_in);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rle_texture_out, 0);
-
-    // cumsum to count doubles (to get moves left)
-    gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 4);
-    for (let i = 0; i < n_sum; i++){
-        gl.uniform1i(gl.getUniformLocation(rle_program, 'i'), i);
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-        // swap textures
-        swap_textures();
-    }
+    // cumsum to count doubles (to get moves right)
+    run_step(4, n_sum);
 
     // TODO: read last pixel to get number of doubles
+    swap_textures();
+    double_count = new Int32Array(2);
+    gl.finish();
+    gl.readPixels(width - 1, 0, 1, 1, gl.RG_INTEGER, gl.INT, double_count, 0);
+    swap_textures();
 
     // gather right
-    gl.uniform1i(gl.getUniformLocation(rle_program, 'step'), 6);
-    for (let i = 0; i < n_sum; i++){
-        gl.uniform1i(gl.getUniformLocation(rle_program, 'i'), i);
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-        // swap textures
-        swap_textures();
-    }
-    
-    // swap textures
-    swap_textures();
-
-    // download buffer from gpu
-    let rle_buffer = new Int32Array(width * height * 2);
-    gl.readPixels(0, 0, width, height, gl.RG_INTEGER, gl.INT, rle_buffer, 0);
-    let rle_blob = new Blob([rle_buffer], {type: 'application/octet-stream'});
-    let rle_link = document.getElementById('rle-download');
-    rle_link.href = window.URL.createObjectURL(rle_blob);
-    rle_link.download = 'rle_buffer.bin';
-
-    // swap textures
-    swap_textures();
+    run_step(6, n_sum);
 
     // render to output
     gl.useProgram(output_program);
@@ -537,8 +491,12 @@ function main(){
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
     // download buffer from gpu
-    let buffer = new Uint8Array(width * height);
-    gl.readPixels(0, 0, width, height, gl.RED_INTEGER, gl.UNSIGNED_BYTE, buffer, 0);
+    n_bytes = width * height - repeat_count[0] + double_count[0];
+    n_rows = Math.ceil(n_bytes / width);
+    console.log(n_bytes);
+    console.log(n_rows);
+    let buffer = new Uint8Array(width * n_rows);
+    gl.readPixels(0, height - n_rows, width, n_rows, gl.RED_INTEGER, gl.UNSIGNED_BYTE, buffer, 0);
     let blob = new Blob([buffer], {type: 'application/octet-stream'});
     let link = document.getElementById('download');
     link.href = window.URL.createObjectURL(blob);
