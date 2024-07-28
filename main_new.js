@@ -155,11 +155,11 @@ void main(){
             break;
         case 3: // prepare for double count
             // get source value
-            int idx_src = this_rle.y;
+            int idx_src = this_rle.y - 1;  // if value to left is 0|15 : 1 else 0
             ivec2 ij_src = idx2ij(idx_src);
             uint src_value = texelFetch(value_tex, ij_src, 0).x;
             frag_color = this_rle;
-            if (idx_src > 0 && (src_value == uint(0) || src_value == uint(15))){
+            if (idx_src >= 0 && (src_value == uint(0) || src_value == uint(15))){
                 frag_color.x = 1;
             } else {
                 frag_color.x = 0;
