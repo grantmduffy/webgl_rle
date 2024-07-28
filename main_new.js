@@ -261,18 +261,18 @@ void main(){
         this_src = texelFetch(rle_tex, idx2ij(this_idx - 1), 0).y;
         right_src =  texelFetch(rle_tex, idx2ij(this_idx + 1), 0).y;
         val = texelFetch(value_tex, idx2ij(this_src), 0).y;
-        run = uint(right_src - this_src);  // TODO: check for end of encoding
+        run = right_src > this_src ? uint(right_src - this_src) : uint(width * height - this_src);
         frag_color = run & uint(0xff);
     } else {  // first btye of either double or single size
         val = texelFetch(value_tex, idx2ij(this_src), 0).x;
         frag_color |= val << 4;
         if ((val == uint(0)) || (val == uint(15))) { // double, next rle is -1
             right_src = texelFetch(rle_tex, idx2ij(this_idx + 2), 0).y;
-            run = uint(right_src - this_src);  // TODO: check for end of encoding
+            run = right_src > this_src ? uint(right_src - this_src) : uint(width * height - this_src);
             frag_color |= (run >> 8) & uint(0x0f);
         } else { // single, next rle is valid
             right_src = texelFetch(rle_tex, idx2ij(this_idx + 1), 0).y;
-            run = uint(right_src - this_src);  // TODO: check for end of encoding
+            run = right_src > this_src ? uint(right_src - this_src) : uint(width * height - this_src);
             frag_color |= run & uint(0x0f);
         }
     }
