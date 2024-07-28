@@ -235,50 +235,51 @@ precision highp isampler2D;
 uniform usampler2D value_tex;
 uniform isampler2D rle_tex;
 uniform usampler2D out_tex;
-uniform int width;
+uniform int width, height;
 
 in vec2 xy;
 out uint frag_color;
 
-void main(){
-    ivec2 this_ij;
-    ivec2 right_ij;
-    ivec2 this_rle;
-    ivec2 right_rle;
-    bool first_byte = false;
+int ij2idx(ivec2 ij){
+    return (height - ij.y - 1) * width + ij.x;
+    // return ij.y * width + ij.x;
+}
 
-    this_ij = ivec2(gl_FragCoord.xy);
-    this_rle = texelFetch(rle_tex, this_ij, 0).xy;
-    if (this_rle.y == -1){
-        this_ij += ivec2(1, 0);
-        this_rle = texelFetch(rle_tex, this_ij, 0).xy;
-        first_byte = true;
-    }
-    if (this_rle.y == -1){
-        frag_color = uint(0);
-        return;
-    }
-    uint this_value = texelFetch(value_tex, ivec2(this_rle.y, this_ij.y), 0).x;
-    right_ij = this_ij + ivec2(1, 0);
-    right_rle = texelFetch(rle_tex, right_ij, 0).xy;
-    if (right_rle.y == -1){
-        right_ij += ivec2(1, 0);
-        right_rle = texelFetch(rle_tex, right_ij, 0).xy;
-    }
-    int run_length = right_rle.y - this_rle.y;
-    if (this_value == uint(0) || this_value == uint(15)){
-        if (first_byte) {
-            frag_color = this_value << 4 | uint(run_length & 0x0f00) >> 8;
-        } else {
-            frag_color = uint(run_length & 0x00ff);
+ivec2 idx2ij(int idx){
+    return ivec2(idx % width, height - idx / width - 1);
+    // return ivec2(idx % width, idx / width);
+}
+
+void main(){
+    ivec2 this_ij = ivec2(gl_FragCoord.xy);
+    int this_idx = ij2idx(this_ij);
+    int this_src = texelFetch(rle_tex, this_ij, 0).y;
+    frag_color = uint(0);
+    int right_src;
+    uint val, run;
+    if (this_src == -1){  // must be the second byte of a large encoding
+        this_src = texelFetch(rle_tex, idx2ij(this_idx - 1), 0).y;
+        right_src =  texelFetch(rle_tex, idx2ij(this_idx + 1), 0).y;
+        val = texelFetch(value_tex, idx2ij(this_src), 0).y;
+        run = uint(right_src - this_src);  // TODO: check for end of encoding
+        frag_color = run & uint(0xff);
+    } else {  // first btye of either double or single size
+        val = texelFetch(value_tex, idx2ij(this_src), 0).x;
+        frag_color |= val << 4;
+        if ((val == uint(0)) || (val == uint(15))) { // double, next rle is -1
+            right_src = texelFetch(rle_tex, idx2ij(this_idx + 2), 0).y;
+            run = uint(right_src - this_src);  // TODO: check for end of encoding
+            frag_color |= (run >> 8) & uint(0x0f);
+        } else { // single, next rle is valid
+            right_src = texelFetch(rle_tex, idx2ij(this_idx + 1), 0).y;
+            run = uint(right_src - this_src);  // TODO: check for end of encoding
+            frag_color |= run & uint(0x0f);
         }
-    } else {
-        frag_color = this_value << 4 | uint(run_length & 0x0f);
-        // frag_color = uint(run_length & 0x0f);
     }
+
 }`;
 
-const newLocal = canvas_src = `#version 300 es
+canvas_src = `#version 300 es
 
 #define max_run_small uint(15)
 #define max_run_large uint(0x0fff)
@@ -443,6 +444,15 @@ function main(){
     gl.useProgram(value_program);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, value_texture, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    {
+        // save value for debug
+        let debug = new Uint8Array(width * height);
+        gl.readPixels(0, 0, width, height, gl.RED_INTEGER, gl.UNSIGNED_BYTE, debug, 0);
+        let link = document.getElementById('value-download');
+        link.href = window.URL.createObjectURL(new Blob([debug], {type: 'application/octet-stream'}));
+        link.download = 'values.bin';
+    }
     
     // find repeats
     gl.useProgram(rle_program);
@@ -460,7 +470,7 @@ function main(){
     // cumsum to count repeats (to get moves left)
     run_step(4, n_sum);
 
-    // TODO: read last pixel to get number of repeats
+    // read last pixel to get number of repeats
     swap_textures();
     repeat_count = new Int32Array(2);
     gl.readPixels(width - 1, 0, 1, 1, gl.RG_INTEGER, gl.INT, repeat_count, 0);
@@ -475,7 +485,7 @@ function main(){
     // cumsum to count doubles (to get moves right)
     run_step(4, n_sum);
 
-    // TODO: read last pixel to get number of doubles
+    // read last pixel to get number of doubles
     swap_textures();
     double_count = new Int32Array(2);
     gl.finish();
@@ -485,6 +495,17 @@ function main(){
     // gather right
     run_step(6, n_sum);
 
+    {
+        // save result for debug
+        swap_textures();
+        let debug = new Int32Array(width * height * 2);
+        gl.readPixels(0, 0, width, height, gl.RG_INTEGER, gl.INT, debug, 0);
+        let link = document.getElementById('rle-download');
+        link.href = window.URL.createObjectURL(new Blob([debug], {type: 'application/octet-stream'}));
+        link.download = 'debug_out.bin';
+        swap_textures();
+    }
+
     // render to output
     gl.useProgram(output_program);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, out_texture, 0);
@@ -493,8 +514,6 @@ function main(){
     // download buffer from gpu
     n_bytes = width * height - repeat_count[0] + double_count[0];
     n_rows = Math.ceil(n_bytes / width);
-    console.log(n_bytes);
-    console.log(n_rows);
     let buffer = new Uint8Array(width * n_rows);
     gl.readPixels(0, height - n_rows, width, n_rows, gl.RED_INTEGER, gl.UNSIGNED_BYTE, buffer, 0);
     let blob = new Blob([buffer], {type: 'application/octet-stream'});
