@@ -445,14 +445,14 @@ function main(){
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, value_texture, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-    {
-        // save value for debug
-        let debug = new Uint8Array(width * height);
-        gl.readPixels(0, 0, width, height, gl.RED_INTEGER, gl.UNSIGNED_BYTE, debug, 0);
-        let link = document.getElementById('value-download');
-        link.href = window.URL.createObjectURL(new Blob([debug], {type: 'application/octet-stream'}));
-        link.download = 'values.bin';
-    }
+    // {
+    //     // save value for debug
+    //     let debug = new Uint8Array(width * height);
+    //     gl.readPixels(0, 0, width, height, gl.RED_INTEGER, gl.UNSIGNED_BYTE, debug, 0);
+    //     let link = document.getElementById('value-download');
+    //     link.href = window.URL.createObjectURL(new Blob([debug], {type: 'application/octet-stream'}));
+    //     link.download = 'values.bin';
+    // }
     
     // find repeats
     gl.useProgram(rle_program);
@@ -495,16 +495,16 @@ function main(){
     // gather right
     run_step(6, n_sum);
 
-    {
-        // save result for debug
-        swap_textures();
-        let debug = new Int32Array(width * height * 2);
-        gl.readPixels(0, 0, width, height, gl.RG_INTEGER, gl.INT, debug, 0);
-        let link = document.getElementById('rle-download');
-        link.href = window.URL.createObjectURL(new Blob([debug], {type: 'application/octet-stream'}));
-        link.download = 'debug_out.bin';
-        swap_textures();
-    }
+    // {
+    //     // save result for debug
+    //     swap_textures();
+    //     let debug = new Int32Array(width * height * 2);
+    //     gl.readPixels(0, 0, width, height, gl.RG_INTEGER, gl.INT, debug, 0);
+    //     let link = document.getElementById('rle-download');
+    //     link.href = window.URL.createObjectURL(new Blob([debug], {type: 'application/octet-stream'}));
+    //     link.download = 'debug_out.bin';
+    //     swap_textures();
+    // }
 
     // render to output
     gl.useProgram(output_program);
@@ -512,11 +512,20 @@ function main(){
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
     // download buffer from gpu
-    n_bytes = width * height - repeat_count[0] + double_count[0];
+    n_bytes = width * height - repeat_count[0] + double_count[0] + 2;
     n_rows = Math.ceil(n_bytes / width);
-    let buffer = new Uint8Array(width * n_rows);
-    gl.readPixels(0, height - n_rows, width, n_rows, gl.RED_INTEGER, gl.UNSIGNED_BYTE, buffer, 0);
-    let blob = new Blob([buffer], {type: 'application/octet-stream'});
+    let raw_buffer = new Uint8Array(width * n_rows);
+    gl.readPixels(0, height - n_rows, width, n_rows, gl.RED_INTEGER, gl.UNSIGNED_BYTE, raw_buffer, 0);
+    function reverse(i){
+        step = raw_buffer.length - Math.floor(i / width) * width - 1;
+    }
+    let reverse_buffer = Uint8Array.from(
+        Array(raw_buffer.length).keys(), 
+        (i) => raw_buffer[width * (
+            Math.floor(raw_buffer.length / width) - Math.floor(i / width) - 1
+        ) + i % width]
+    );
+    let blob = new Blob([reverse_buffer.slice(0, n_bytes)], {type: 'application/octet-stream'});
     let link = document.getElementById('download');
     link.href = window.URL.createObjectURL(blob);
     link.download = 'rle_output.bin';
